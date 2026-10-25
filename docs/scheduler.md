@@ -2,8 +2,9 @@
 
 ## 1. The tick
 
-`sb-tick` is started by a systemd user timer in WSL every 30 minutes (Windows side in
-[architecture.md](architecture.md) §6). One tick runs **at most one ticket**:
+`sb-tick` is started every 30 minutes by the clock: Windows Task Scheduler or a systemd timer in
+WSL, the owner's call ([ARCHITECTURE.md](ARCHITECTURE.md) §6, [BRAINSTORM.md](BRAINSTORM.md) A5).
+One tick runs **at most one ticket**:
 
 1. **Lock.** Take `~/.switchboard/tick.lock`. If a run is already going, exit; ticks never
    overlap.
@@ -45,7 +46,7 @@ value(t) =  V_CLOSE                                   # the ticket itself
           − V_NEWROOT · starts_new_epic(t)            # opening a new front while others are open
 
 spend(t) =  start_cost(t)                             # from prompt-cache.md §2: warm resume ≈ 0.1×(S+H),
-                                                      #   cold resume ≈ 2×(S+H), fresh ≈ 0.1×S + 2×P + re-read
+                                                      #   cold resume ≈ 2×(S+H), fresh ≈ 0.1×26k + 2×(T+P) + re-read
           + work_cost(size(t), repo(t))               # median cost of runs of that size in that repo
           × runs_to_close(t)                          # 1 for most tickets; from the handoff's own
                                                       #   estimate or the repo's history otherwise
@@ -98,7 +99,8 @@ and `V_NEWROOT` both relax so that idle repos and new ideas get turns.
 
 The owner splits the subscription limits by day. `pace = used_fraction / elapsed_fraction` is
 measured over the weekly window, and the day's target is the weekly share for that day
-(configurable, e.g. weekdays heavier).
+(configurable, e.g. weekdays heavier). `used_fraction` is the seven-day `utilization` and the
+window's end is its `resetsAt`, both from the latest usage snapshot (§7).
 
 | Pace | Behaviour |
 | --- | --- |
@@ -132,10 +134,13 @@ tool calls (§4).
 | --- | --- | --- |
 | 80% | `PostToolUse` hook returns `additionalContext`, once | "80% of this run's budget is used. Finish the step in hand, commit it, then wrap up." |
 | 100% | `PreToolUse` hook | Denies every tool except the `sb` CLI and `git commit` on the ticket branch |
-| 110% or wall clock | `sb-tick` sends SIGTERM, then SIGKILL | The run is recorded as killed. The digest and handoff pipeline treats it like any other run |
+| Turn limit | `--max-turns` | Claude Code ends the run itself: exit 1, `result.subtype = "error_max_turns"`, partial work kept. Recorded as a partial run, not a crash. Denied tool calls count as turns, and so does the `Stop` hook's one extra turn, so the turn budget leaves room for both |
+| 110% or wall clock | `sb-tick` sends SIGTERM, then SIGKILL (Claude Code has no timeout flag) | The run is recorded as killed. The digest and handoff pipeline treats it like any other run |
 
-The hooks read the budget from env vars that `sb-tick` sets (`SB_RUN_ID`, `SB_BUDGET_*`) and the
-usage so far from the transcript. They are no-ops when `SB_RUN_ID` is unset, so they never touch
+The hooks read the budget from env vars that `sb-tick` sets (`SB_RUN_ID`, `SB_BUDGET_*`). They
+count turns, tool calls and wall clock themselves, in a state file keyed on `session_id`, and add
+cost from the transcript with a margin, because the transcript is one turn behind while a run is
+in progress ([verification.md](verification.md) §11). They are no-ops when `SB_RUN_ID` is unset, so they never touch
 the owner's interactive sessions. Harness overhead (digests, Haiku handoffs, routing) is tracked
 separately in the run log and counts against the *daily* pace, not against any run.
 
@@ -195,8 +200,12 @@ Sent to the Usage topic:
   N questions. Top open items: …" with buttons **[burst now]** **[add idea]** **[fine]**.
 - End of week and end of month: the same, plus closed epics and decisions made.
 
-Where the percentages come from is an open question: the statusline does not run under `-p`
-**(verify)**. The candidate sources are in [BRAINSTORM.md](BRAINSTORM.md).
+The percentages come from the runs themselves ([verification.md](verification.md) §2). Every
+stream-json run emits a `rate_limit_event` with `unifiedWindows.five_hour` and `seven_day`
+(`utilization` 0 to 1, `resetsAt`, `status`), and `sb-tick` stores the last one per run in
+`usage_snapshots`. When no run has happened for a tick, `sb-tick` runs `claude -p "/usage"`
+instead, which makes no model call. The gates in §1 (`FIVE_HOUR_STOP`, `reset_at`) read the same
+snapshot. switchboard never calls the usage endpoint itself.
 
 ## 8. Scheduled jobs (`SCHEDULED`)
 

@@ -13,7 +13,7 @@ the calls go both ways: questions from agents to the owner, and answers and idea
 to the right agent.
 
 > Status: design only. No code exists yet. These docs are the brief for the agents that will
-> build it. Start with this file, then [docs/architecture.md](docs/architecture.md).
+> build it. Start with this file, then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -34,7 +34,10 @@ still there to inspect in VSCode.
 
 1. **No server and no API-key token spend.** Everything drives the owner's own Claude Code CLI
    on the laptop (WSL2) with the existing claude.ai subscription login. There is no Anthropic
-   API key and no hosted backend.
+   API key and no hosted backend. switchboard only ever spawns the unmodified `claude` binary:
+   it never reads `~/.claude/.credentials.json` or calls Anthropic endpoints with the
+   subscription token, and only the owner can command it. That is what keeps unattended use
+   within the terms ([docs/verification.md](docs/verification.md) §1).
 2. **The laptop version comes first.** Cloud routines (`/schedule`) come later and are optional,
    used only if they are simple.
 3. **Burn as few tokens as possible.** The default is deterministic code (Python, `gh`, SQLite,
@@ -59,14 +62,14 @@ still there to inspect in VSCode.
 | Topic | Decision | Where |
 | --- | --- | --- |
 | Messaging | **Telegram bot**. One forum topic per repo, reply-to threading, inline buttons, long polling (no inbound ports, so it also works away from home) | [docs/telegram.md](docs/telegram.md) |
-| Claude Code integration | Headless `claude -p` with `--session-id` / `--resume`, hooks for budgets, statusline for limit snapshots, and Channels as an optional live lane | [docs/architecture.md](docs/architecture.md) |
+| Claude Code integration | Headless `claude -p` with `--session-id` / `--resume`, hooks for budgets, the stream-json `rate_limit_event` for usage percentages, and Channels as an optional live lane. Every flag was checked on 2.1.310 ([docs/verification.md](docs/verification.md)) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Sessions vs. cache | Start fresh with a compact context pack by default. Resume only while the prompt cache is warm. Dynamic text stays out of the cached prefix | [docs/prompt-cache.md](docs/prompt-cache.md) |
 | Scheduling | Deliberately **unfair**: finish open work (and use warm caches) before starting new work, with a starvation floor so every repo gets some ticks | [docs/scheduler.md](docs/scheduler.md) |
 | Fan-out | Hard limits enforced by code (depth, children per parent, open per repo), not by prompts | [docs/scheduler.md](docs/scheduler.md) |
 | Routing new messages | Deterministic routing first (topic, then tag, then BM25 over repo READMEs). If that is unsure, a cheap router (Haiku 5.5, low effort) rewrites the message into a clean prompt and picks the repo and the skill. If the router is unsure too, switchboard's own `/triage` skill runs on the message verbatim | [docs/telegram.md](docs/telegram.md) |
 | Tracker | **Decided: our own tracker on GitHub Issues + SQLite**, with the best features of Beads, Task Master and CCPM built in. Generous labels; no GitHub issue per question. Orchestrators are out | [docs/tracker.md](docs/tracker.md) (build brief), [docs/tracker-report.md](docs/tracker-report.md) |
 | Scope | Apps never carry the harness: `harness-mode` and its guard install only with `setup.py --harness` into switchboard's slots; `/triage` lives in this repo | [docs/skills-extensions.md](docs/skills-extensions.md) §0 |
-| Reach | Every git repo under `side-projects`, switchboard and epf3-skills included. switchboard runs from an installed release, so editing itself is safe | [docs/architecture.md](docs/architecture.md) §6b |
+| Reach | Every git repo under `side-projects`, switchboard and epf3-skills included. switchboard runs from an installed release, so editing itself is safe | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §6b |
 | Skills | Every repo uses [`epf3-skills`](../epf3-skills/). switchboard adapts to it, plus a short list of proposed extensions | [docs/skills-extensions.md](docs/skills-extensions.md) |
 | Laptop off / limits exhausted | That tick is skipped. On boot the day's round-robin restarts. Nothing runs in the cloud for now | [docs/scheduler.md](docs/scheduler.md) |
 
@@ -101,20 +104,20 @@ message and the gate it waits on.
    │ context packs: ~/.switchboard/packs/<repo>/<ticket>.md        │
    └────────┬──────────────────────────────────────────────────────┘
             ▼
-   sb-tick (every 30 min: Task Scheduler → WSL systemd timer)
+   sb-tick (every 30 min; the clock is open, see ARCHITECTURE.md §6)
      lock → laptop/limit checks → scheduler picks ticket → build prompt
      → claude -p … (--resume if cache warm, else fresh + context pack)
      → hooks enforce budget → status + Next: line → log + digest
      (handoff built later by Haiku 5.5 low, only if the next start is cold)
 ```
 
-The details are in [docs/architecture.md](docs/architecture.md).
+The details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## 6. Doc index
 
 | Doc | What it holds |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Components, data model, Python layout, Claude Code flags and hooks, WSL/Windows automation, security |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data model, Python layout, Claude Code flags and hooks, WSL/Windows automation, security |
 | [docs/prompt-cache.md](docs/prompt-cache.md) | How the prompt cache behaves under ticks, and the session / resume / summarise policy that follows |
 | [docs/scheduler.md](docs/scheduler.md) | Unfair scheduler, budgets, wrap-up protocol, fan-out limits, skip rules |
 | [docs/telegram.md](docs/telegram.md) | Bot setup, topics, message format, reply routing, the deterministic-then-LLM routing ladder |
@@ -122,6 +125,7 @@ The details are in [docs/architecture.md](docs/architecture.md).
 | [docs/tracker.md](docs/tracker.md) | **Tracker build brief**: decisions, labels, features taken from Beads, Task Master and CCPM, build order |
 | [docs/tracker-report.md](docs/tracker-report.md) | The use-case tracker report: capability matrix, concurrency, overhead, fan-out, the recommended design, and when to pick each option |
 | [docs/skills-extensions.md](docs/skills-extensions.md) | How switchboard drives `epf3-skills`, and what to add to that repo |
+| [docs/verification.md](docs/verification.md) | What was checked against the installed Claude Code and WSL, how, and what it changed: terms of use, usage source, flags, caching, skills, stream-json fields, WSL idle settings |
 | [docs/BRAINSTORM.md](docs/BRAINSTORM.md) | Open questions to settle with agents (`/brainstorm` per topic) before building |
 
 ## 7. Build phases (laptop only)

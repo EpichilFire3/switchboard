@@ -7,8 +7,8 @@ Evidence key: **[src]** read in the cloned source, **[live]** run against the Gi
 laptop, **[docs]** the project's own docs or GitHub's docs, **[est]** my estimate,
 **[unverified]** not checked.
 
-Source clones (read-only):
-`/tmp/claude-1000/-home-sahil-side-projects/50cf1227-b1c2-4446-a666-f52a0119574e/scratchpad/eval-trackers/{beads,claude-task-master,ccpm}`.
+Source clones (read-only, gitignored): `tmp/eval-trackers/{beads,claude-task-master,ccpm}` in
+this repo, re-cloned 2026-10-25 at the commits below.
 In this doc they are written `BD/`, `TM/` and `CC/`. Beads is at `main` `b5881d73e`
 (2026-10-24); the latest release is v1.3.2 (2026-10-23). Task Master is at 0.43.1 (`c0c98d36`,
 2026-04-23). CCPM is at `3294c85`.

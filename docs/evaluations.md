@@ -99,9 +99,9 @@ ideas only.
 
 | Feature | Use |
 | --- | --- |
-| Headless `claude -p`, `--session-id`, `--resume`, `stream-json` | The run itself, and usage/TTL measurement |
+| Headless `claude -p`, `--session-id`, `--resume`, `stream-json` | The run itself, usage/TTL measurement, and the usage percentages (`rate_limit_event`) |
 | Hooks (`PostToolUse`, `PreToolUse`, `Stop`, `SessionStart`) | Budget enforcement, guards, the harness-mode brief |
-| Statusline `rate_limits` | Usage snapshots from interactive sessions (only one source; see BRAINSTORM A2) |
+| Headless `/usage` | Usage percentages when no run has happened recently; no model call ([verification.md](verification.md) §2) |
 | Channels (v2.1.80+, research preview) | Optional live lane, on a second bot |
 | `/remote-control` | The owner's fallback away from home |
 | Cloud routines (`/schedule`) | Later, for `cloud_ok` tickets |

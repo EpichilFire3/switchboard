@@ -147,5 +147,9 @@ keeps the owner's pipeline intact.
   `setMessageReaction`, `createForumTopic`. A framework (python-telegram-bot, aiogram) is
   acceptable if it stays thin.
 - Persist the `getUpdates` offset in SQLite, so a restart never replays or loses updates.
-- `sb-inbox` runs as a systemd **user** service with `Restart=always`. It spends no tokens. Its
-  only LLM call is rung L3, which runs as a subprocess with a timeout.
+- `sb-inbox` is a long-running process that restarts on failure. It cannot be a plain systemd
+  user service: WSL does not count systemd services as activity, and stops the distro under them.
+  How it is started and kept alive is in [ARCHITECTURE.md](ARCHITECTURE.md) §6. It spends no
+  tokens. Its only LLM call is rung L3, which runs as a subprocess with a timeout.
+- The allowlist is the owner alone. Anyone else who can command the bot would be using the
+  owner's subscription ([verification.md](verification.md) §1).

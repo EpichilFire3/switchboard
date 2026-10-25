@@ -3,9 +3,10 @@
 This is the brief for the agent (Opus) that builds switchboard's task tracking. It holds the
 owner's decisions from 2026-10-24 and the features to take from Beads, Task Master and CCPM. The
 evidence behind it is in [tracker-report.md](tracker-report.md) (use-case report) and
-[evaluations.md](evaluations.md) (neutral evaluation). The cloned sources are under the scratchpad
-of session `50cf1227…`. If they are gone, re-clone `gastownhall/beads`,
-`eyaltoledano/claude-task-master` and `automazeio/ccpm` read-only.
+[evaluations.md](evaluations.md) (neutral evaluation). The cloned sources are in
+`tmp/eval-trackers/{beads,claude-task-master,ccpm}` (gitignored), checked out at the commits
+[tracker-report.md](tracker-report.md) cites. If they are gone, re-clone `gastownhall/beads`,
+`eyaltoledano/claude-task-master` and `automazeio/ccpm` there and check out those commits.
 
 ## 1. Decisions (owner, 2026-10-24)
 

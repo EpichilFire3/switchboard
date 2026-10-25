@@ -47,9 +47,10 @@ hook (§3.6).
 
 ## 3. Proposed additions to epf3-skills
 
-**Status (2026-10-24):** implemented in the local epf3-skills git repo (no remote), as an
-uncommitted diff on `main` that the owner pushes. `git diff` shows the edits;
-`skills/harness-mode/` and `skills/triage/` are untracked.
+**Status (2026-10-25):** implemented and committed in epf3-skills (`a22c02b`, "feat: lsp,
+trailhq, harness mode") and pushed to `EpichilFire3/epf3-skills` (private). That repo has no
+integration branch: work lands on `main`, and `guard-git.py` allows pushes there for that repo
+only. `triage` lives in switchboard.
 
 | § | Item | Status |
 | --- | --- | --- |
@@ -123,7 +124,10 @@ state, so it is cheap and stays stable for the cache.
 Denies the never-auto actions unless the harness wrote an approval file for this run,
 `~/.switchboard/approvals/<SB_RUN_ID>/<action>` (`merge-<pr>`, `push-development`, `production`).
 `sb-tick` finds the PR number for `merge-<pr>` with `gh pr list --head <branch>`. It denies: merging PRs (`gh pr merge`), pushing to `development`/`main`, devops production
-commands, and editing `~/.switchboard/`. This is defence in depth behind the runner's allowlist.
+commands, and editing `~/.switchboard/`. Together with the runner's allowlist, it is the actual
+barrier for never-auto actions, not defence in depth: `disable-model-invocation` does not stop
+the model from invoking a skill whose exact `/name` appears in its context
+([verification.md](verification.md) §6).
 
 ### 3.7 A `triage` skill (now in switchboard, `.claude/skills/triage/`)
 

@@ -4,8 +4,8 @@ Ticks are 30 minutes apart, so cache behaviour drives the harness's cost more th
 else. This doc covers how the cache behaves, what that means for ticks, and the policy that
 follows.
 
-Facts marked **(verify)** must be checked against the installed Claude Code version (2.1.251
-on 2026-10-24) before code depends on them. §5 says how.
+The facts here were checked against Claude Code 2.1.310 on 2026-10-25
+([verification.md](verification.md) §4, §7, §8). Re-check them after an upgrade; §5 says how.
 
 ## 1. How the cache works (the parts that matter here)
 
@@ -14,8 +14,11 @@ on 2026-10-24) before code depends on them. §5 says how.
   early, everything after it is a miss.
 - **TTL: 60 minutes, counted from the last use.** Claude Code on the owner's subscription caches
   for an hour. Every hit refreshes the clock, so a session's cache expires 60 minutes after its
-  **last** request, which is the end of its run, not the start. In usage overage the TTL drops to
-  5 minutes (observed, **verify**).
+  **last** request, which is the end of its run, not the start. Measured: every write goes to
+  the 1-hour bucket, and a resumed session was warm at 8 and 45 minutes and cold at 65
+  ([verification.md](verification.md) §8). In usage overage
+  the TTL is reported to drop to 5 minutes. That has not been reproduced: detect it from the 5m
+  bucket turning non-zero (§5).
 - **Prices, as API-equivalent multipliers of base input:** 1-hour write 2×, 5-minute write
   1.25×, read 0.1×. Subscription limits are not published as token formulas. Assume they weight
   the same way until measured.
@@ -25,15 +28,20 @@ on 2026-10-24) before code depends on them. §5 says how.
 
 ## 2. What that means for ticks
 
-Let `S` be the static prefix (tools + system prompt + CLAUDE.md + skill listing, roughly
-20–40k tokens), `H` the session history, and `P` a context pack (~3–5k tokens). The cost of the
-first request of a run, in base-input units:
+Let `S` be the static prefix (tools + system prompt + CLAUDE.md + skill listing), `H` the session
+history, and `P` a context pack (~3–5k tokens). Measured with the harness load flags
+([verification.md](verification.md) §10), a fresh run's first request is ~35.5k tokens. `S`
+splits into ~26k shared by every fresh session (system prompt and built-in tools) and a ~9.5k
+tail `T` (mostly the skill listing), which is never shared across sessions and is written fresh
+on every fresh start. So a fresh start with the static prefix warm costs about
+`0.1 × 26k + 2 × (T + P)`, not `0.1 × S + 2 × P`. A resume reads `T` from its own session's cache
+like the rest of its history. The cost of the first request of a run, in base-input units:
 
 | Start mode | Cache state | Cost of first request | Notes |
 | --- | --- | --- | --- |
 | Resume | warm | 0.1 × (S + H) | Cheapest, with full working memory |
 | Resume | cold | 2 × (S + H) | **Worst case.** 100k of history costs 200k |
-| Fresh + pack | static prefix warm | 0.1 × S + 2 × P | Same repo ran within the hour |
+| Fresh + pack | static prefix warm | 0.1 × 26k + 2 × (T + P) | Any fresh session ran within the hour. `T` ≈ 9.5k is never shared |
 | Fresh + pack | cold | 2 × (S + P) | Plus re-discovery: the agent re-reads files it needs (10–30k) |
 
 **Cache life per ticket.** A run ends ~10–15 minutes into its tick, so the session that worked
@@ -82,7 +90,8 @@ else
       → FRESH + pack     (claude -p --session-id <new uuid>)
 ```
 
-`H` comes from the last `usage` record in the transcript (input + cache_read + cache_creation).
+`H` comes from the last request's `usage` (input + cache_read + cache_creation), i.e.
+`result.usage.iterations[-1]`, or the last `assistant` line of the transcript.
 This is deterministic: no LLM is involved.
 
 ### 3.3 Running early to beat the clock
@@ -99,14 +108,24 @@ the same gates as a normal tick.
 ### 3.4 Keeping the prefix stable (so `S` is shared)
 
 - **The harness preamble is static text** (the tick protocol, budget rules, how to call `sb`),
-  passed through `--append-system-prompt` (**verify** the flag, or a file variant) and
-  byte-identical every run. No timestamps, ticket IDs, budget numbers or repo names.
+  passed through `--append-system-prompt-file` (the inline flag behaves the same) and
+  byte-identical every run. No timestamps, ticket IDs, budget numbers or repo names. A one-byte
+  change re-writes the ~2.6k tokens after it.
+- **Git state is not a problem.** A dirty tree, untracked files and new commits left the shared
+  prefix unchanged.
+- **Load less.** Harness runs drop user settings, every MCP server and the claude-mem and
+  context7 plugins, and keep the slot's `local` settings, which hold epf3's hooks
+  ([ARCHITECTURE.md](ARCHITECTURE.md) §3). The first request falls from 45.6k to 35.5k, and the
+  unshared tail from 19.6k to 9.5k ([verification.md](verification.md) §10). The tail scales with
+  the number of skills listed, so a smaller skill set in the slot is the next lever.
 - **Everything dynamic goes at the end, in the user prompt:** the ticket, the pack, the owner's
   answers, the budget.
 - **Hook messages arrive late**, after the cached prefix, so they cost nothing. This includes
   the PostToolUse budget notices.
-- **SessionStart output must be deterministic.** epf3's `session-brief.py` has a terse,
-  deterministic variant under `SB_RUN_ID` (in epf3-skills).
+- **SessionStart output must be deterministic.** It is injected into the prefix, ahead of the
+  user prompt, so output that changes between runs breaks the cache from there on
+  ([verification.md](verification.md) §11). epf3's `session-brief.py` has a terse, deterministic
+  variant under `SB_RUN_ID` (in epf3-skills).
 - **One model per lane per repo,** so tickets in the same repo share the static prefix.
 
 ### 3.5 Handoffs and context packs: built by the harness, after the run, with Haiku
@@ -130,9 +149,10 @@ harness overhead:
    next start is **FRESH**, which means the cache went cold or the session grew too long. A warm
    resume needs no handoff, so most runs never pay for one.
 3. **Model: always the cheapest.** `claude -p --model claude-haiku-5-5 --effort low
-   --max-turns 1` (**verify** the effort flag) reads the *digest*, never the full transcript (a
+   --max-turns 1 --output-format json` reads the *digest*, never the full transcript (a
    different model gets no benefit from the worker's cache). It writes the pack's handoff
-   section to a strict JSON schema.
+   section as JSON to a schema given in the prompt, which Python validates (`--json-schema`
+   needs a second turn, see [ARCHITECTURE.md](ARCHITECTURE.md) §8).
 4. **The pack** (`~/.switchboard/packs/<repo>/<ticket>.md`) has fixed sections and is capped at
    ~4k tokens:
    - **Ticket:** copied from the tracker, verbatim.
@@ -157,19 +177,23 @@ Nothing is special about it.
 
 ## 5. Measure, don't assume
 
-Every run uses `--output-format stream-json`. The `result` event and each assistant event's
-`usage` carry `input_tokens`, `output_tokens`, `cache_read_input_tokens` and
+Every run uses `--output-format stream-json --verbose`. The `result` event and each assistant
+event's `usage` carry `input_tokens`, `output_tokens`, `cache_read_input_tokens` and
 `cache_creation_input_tokens`, plus a breakdown by TTL
-(`cache_creation.ephemeral_1h_input_tokens` / `ephemeral_5m_input_tokens`) **(verify the field
-names)**. `sb-tick` stores all of them per run, and from them derives:
+(`cache_creation.ephemeral_1h_input_tokens` / `ephemeral_5m_input_tokens`; both always present).
+Two parsing rules ([verification.md](verification.md) §7): the stream has one `assistant` event
+per content block with the same `message.id` and `usage`, so dedupe by id or take run totals from
+`result.usage`; and `output_tokens` on assistant events is a stale snapshot, so final output comes
+from `result.usage`. `sb-tick` stores all of them per run, and from them derives:
 
 - **The TTL actually in use**, from which ephemeral bucket is non-zero. This sets `ttl_seconds`
   and detects overage, when the TTL falls to 5 minutes.
 - **The shared-prefix size:** cache_read on the first request of a fresh run.
 - **The real cost of each start mode,** used to tune the §3.2 thresholds.
-- **A cost-equivalent per run** (`total_cost_usd` in the result event if present, else computed
-  from the multipliers). This is the scheduler's spend unit, calibrated against the subscription
-  `rate_limits` percentage.
+- **A cost-equivalent per run:** `total_cost_usd` from the result event. It is present on the
+  subscription and is a list-price estimate (`costBasis: "list"`), not billed spend, which is what
+  a cost-equivalent unit should be. This is the scheduler's spend unit, calibrated against the
+  utilization in the same run's `rate_limit_event`.
 
 ## 6. Defaults to start with
 
