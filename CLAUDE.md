@@ -7,4 +7,4 @@ lists the lanes; start work through them.
 - Codebase map: docs/ARCHITECTURE.md (committed) and .recon/index.md (derived). Ask Explore where
   things live; it reads the map first.
 - Recurring bug classes and what prevents them: docs/MISTAKES.md. Read the entries whose Where matches the files you are changing.
-- Integration branch: development. Nothing is committed on it directly.
+- Integration branch: development. Only main is protected: nothing is committed on main directly.

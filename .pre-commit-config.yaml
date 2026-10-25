@@ -18,7 +18,7 @@ repos:
       - id: check-json
         exclude: '(^|/)(tsconfig|jsconfig)[^/]*\.json$|^\.vscode/'
       - id: no-commit-to-branch
-        args: [--branch, main, --branch, master, --branch, development]
+        args: [--branch, main]
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
