@@ -1,0 +1,98 @@
+# epf3 commit gate, from skills/ship/hooks/pre-commit-config.yaml.
+# Copy to the repo root as .pre-commit-config.yaml, add the stack blocks from
+# skills/ship/hooks.md, then run `prek install`. Plain pre-commit reads the same file.
+#
+# Mechanical checks only, on what is staged, in a couple of seconds. Nothing here
+# rewrites a file: a hook that reformats whole files mixes formatting into behaviour
+# commits. Judgement (size, reuse, too thin, the spec) is ship's reviewer, never a hook.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: builtin
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+        exclude: '(^|/)(tsconfig|jsconfig)[^/]*\.json$|^\.vscode/'
+      - id: no-commit-to-branch
+        args: [--branch, main, --branch, master, --branch, development]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: added-lines-whitespace
+        name: whitespace errors and conflict markers in added lines
+        entry: git diff --cached --check
+        language: system
+        pass_filenames: false
+
+      - id: agent-litter
+        name: agent working files, scratch and root notes
+        language: fail
+        entry: >-
+          Agent working files never ship: ledgers, scratch, and notes at the repo root.
+          Unstage them; documentation goes under docs/, and a note that matters goes in a
+          report or a ticket.
+        files: '^(\.(brainstorm|research|experiment|recon|spec|implement|implement-tests|run-tests|wizard|devops|ship|diagnose|worktrees)/|(temp|scratch|\.planning)/|(?!(README|CHANGELOG|CLAUDE|AGENTS|CONTRIBUTING|LICENSE|SECURITY)\.md$)[^/]+\.md$)'
+
+      # Conventional Commits subject. For a repo whose history is plain imperative
+      # sentences, swap the entry for the one in skills/ship/hooks.md.
+      - id: commit-subject
+        name: commit subject
+        language: pygrep
+        entry: '\A(Merge |Revert "|(?=[^\n]{1,72}(\n|\Z))(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\([a-z0-9._-]+\))?!?: \S)'
+        args: [--multiline, --negate]
+        stages: [commit-msg]
+
+      - id: commit-trailer
+        name: Refs or Closes trailer
+        language: system
+        entry: >-
+          bash -c 'test -f "$(git rev-parse --git-dir)/MERGE_HEAD" ||
+          git interpret-trailers --parse "$1" | grep -qE "^(Refs|Closes): ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+$" ||
+          { echo "No Refs: #N or Closes: #N trailer in the last paragraph. No ticket, no commit (manage-tickets/github.md)."; exit 1; }' --
+        stages: [commit-msg]
+
+      # A bug fix names the commit that introduced the bug (diagnose/fixing.md). GitHub reads
+      # "Fixes" as a closing keyword, so an issue number here would close that issue.
+      - id: fixes-trailer
+        name: Fixes trailer names a commit, never an issue
+        language: system
+        entry: >-
+          bash -c 'grep -iE "^fixes:" "$1" |
+          grep -vqE "^Fixes: ([0-9a-f]{12,40} \(\".+\"\)|unknown \((omission|pre-history|not bisectable)\))$" &&
+          { echo "Fixes: takes a 12+ character SHA and the subject in (\"...\"), or unknown (omission | pre-history | not bisectable). Never an issue number: GitHub closes the issue a Fixes: line names."; exit 1; };
+          exit 0' --
+        stages: [commit-msg]
+
+      - id: push-to-default
+        name: no push to the default branch
+        language: system
+        entry: >-
+          bash -c 'd=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null); d=${d#origin/};
+          if [ -n "$d" ] && [ "$PRE_COMMIT_REMOTE_BRANCH" = "refs/heads/$d" ]; then
+          echo "Push to $d, the default branch. It is reached only through a PR merged with --merge."; exit 1; fi'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # Only commits the push adds to the remote. PRE_COMMIT_FROM_REF is not used: on a new
+      # branch its range includes target commits merged in, which are already on the remote.
+      - id: pushed-commit-trailers
+        name: every pushed commit names a ticket
+        language: system
+        entry: >-
+          bash -c 'to="$PRE_COMMIT_TO_REF"; git cat-file -e "$to^{commit}" 2>/dev/null || exit 0; bad=0;
+          for c in $(git rev-list --no-merges "$to" --not --remotes="${PRE_COMMIT_REMOTE_NAME:-origin}"); do
+          git log -1 --format=%B "$c" | git interpret-trailers --parse | grep -qE "^(Refs|Closes): ([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+$" ||
+          { echo "$(git log -1 --format="%h %s" "$c"): no Refs or Closes trailer"; bad=1; }; done; exit $bad'
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

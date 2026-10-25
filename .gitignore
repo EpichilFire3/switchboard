@@ -1,0 +1,15 @@
+.brainstorm/
+.claude/
+.diagnose/
+.devops/
+.experiment/
+.implement/
+.implement-tests/
+.research/
+.recon/
+.run-tests/
+.ship/
+.spec/
+.trail/
+.wizard/
+.worktrees/
