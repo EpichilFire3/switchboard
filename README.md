@@ -76,7 +76,9 @@ still there to inspect in VSCode.
 ## 4. What makes Claude ask the owner something
 
 Every outbound message has one **category**. The category picks the skill that formats the
-message and the gate it waits on.
+message and the gate it waits on. Agents never name a category: they pass a question kind
+(`behaviour`, `architecture` or `gate`) to `sb ask`, which maps it to `BEHAVIOUR`, `ARCH` or
+`GATE`. The other categories are sent by switchboard itself.
 
 | Category | Trigger | Expected reply |
 | --- | --- | --- |
@@ -94,7 +96,7 @@ message and the gate it waits on.
  Phone ── Telegram (topics: one per repo + Inbox + Digest + Usage)
             ▲  sendMessage / buttons                │ getUpdates (long poll)
             │                                       ▼
-   sb-ask (CLI the agent calls)            sb-inbox (daemon, no LLM on the hot path)
+   sb ask (CLI the agent calls)            sb-inbox (daemon, no LLM on the hot path)
             ▲                                       │ reply → ticket, new msg → route
             │                                       ▼
    ┌────────┴──────────── state ───────────────────────────────────┐
@@ -132,7 +134,7 @@ The details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 | Phase | Deliverable | Done when |
 | --- | --- | --- |
-| 0 | `sb-inbox` daemon, `sb-ask` CLI, Telegram topics, message↔ticket map | A normal VSCode session calls `sb-ask`; the owner replies on the phone; the answer lands on the ticket |
+| 0 | `sb-inbox` daemon (starts at Windows logon, keeps WSL alive, restarts itself), `sb ask` CLI inside harness runs, Telegram topics, the question map in SQLite. Nothing writes to GitHub | The manual end-to-end check: a shell stand-in calls `sb ask`, then a real headless `claude -p /brainstorm` run does. The owner answers on the phone, and `sb answers` shows the answer for the next run |
 | 1 | `sb-tick` + scheduler + budget hooks, **one repo** | A week of unattended ticks in one repo with usable handoffs and no runaway fan-out |
 | 2 | Round-robin across repos, usage snapshots, `UTIL` and `DIGEST` messages | Every onboarded repo progresses; the daily digest is the only thing the owner reads |
 | 3 | Idea routing (the ladder), `SCHEDULED` jobs, LAN dashboard (read-only) | A one-line idea from the phone becomes a brainstorm round in the right repo with no typing at the laptop |

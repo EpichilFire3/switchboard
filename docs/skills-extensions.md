@@ -57,7 +57,7 @@ only. `triage` lives in switchboard.
 | 3.1 | Async gates | Done: `skills/harness-mode/{SKILL.md,gates.md}`, plus a pointer at every gate in 15 skills |
 | 3.2 | Machine-readable `Next:` line | Done in every report template. `implement` now says `Next: /implement-tests <n>`; it used to say `/ship`, which was a bug |
 | 3.3 | Question-kind tag | Done: `brainstorm` rounds use `Q1. <title> [behaviour\|architecture]` |
-| 3.4 | `question` / `answer` comment kinds | Decided; part of the tracker build ([tracker.md](tracker.md) §4 step 1) |
+| 3.4 | `question` / `answer` comment kinds | **Dropped 2026-10-27.** Q&A stays off GitHub: questions and answers live only in the switchboard database |
 | 3.5 | Terse SessionStart brief | Done: `session-brief.py` under `SB_RUN_ID`, deterministic |
 | 3.6 | `guard-harness.py` | Done, smoke-tested. Installed only with `setup.py --harness`. Approval files are at `~/.switchboard/approvals/<SB_RUN_ID>/<action>` |
 | 3.7 | `triage` skill | Done, and **moved to switchboard** (`.claude/skills/triage/`). It runs in switchboard's checkout and reads siblings at `../<repo>` |
@@ -103,7 +103,11 @@ Each question carries `behaviour` or `architecture` (or `gate`), which becomes t
 category. `brainstorm` already separates user-facing behaviour from implementation choices
 informally. A tag makes the split explicit and routes the two to different notification styles.
 
-### 3.4 Two new comment kinds in `manage-tickets`
+### 3.4 Two new comment kinds in `manage-tickets` (dropped)
+
+> **Dropped 2026-10-27.** `kind=question` and `kind=answer` are not added. Questions, answers and
+> ideas never touch GitHub in Phase 0, and nothing needs defining once Q&A stays off the tickets.
+> The original proposal is kept below for the record.
 
 - `kind=question`: when a run parks a ticket on the owner. This is the existing `blocked`
   comment with the question and the Telegram link.
