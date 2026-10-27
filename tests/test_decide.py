@@ -7,6 +7,14 @@ from tests.sb_harness import SbTestCase
 
 RUN_ON_TICKET_5 = {"SB_RUN_ID": "r1", "SB_TICKET": "5"}
 
+DECISION_REPOS = (
+    "SELECT repos.name, decisions.text FROM decisions JOIN repos ON repos.id = decisions.repo_id"
+)
+DECISION_TICKET_CASES = (
+    ("with a ticket", RUN_ON_TICKET_5),
+    ("without a ticket", {"SB_RUN_ID": "r1"}),
+)
+
 VERBATIM_TEXTS = (
     ("sql fragment", "use sqlite'); DROP TABLE decisions; --"),
     ("html and format specifiers", "<b>bold</b> %s %d {0} {name}"),
@@ -94,6 +102,20 @@ class DecideTest(SbTestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.home.rows("SELECT number FROM tickets"), [(5,)])
+
+
+class DecisionRepoTest(SbTestCase):
+    """Three registered repos; the decision is made from the middle one."""
+
+    def test_decision_records_the_repo_resolved_from_the_current_directory(self) -> None:
+        for case, env in DECISION_TICKET_CASES:
+            with self.subTest(case):
+                home = self.registered_home("alpha", "beta", "gamma")
+
+                result = home.sb("decide", "x", cwd=home.side_projects / "beta", env=env)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(home.rows(DECISION_REPOS), [("beta", "x")])
 
 
 class DecisionTextTest(SbTestCase):

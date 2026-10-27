@@ -47,6 +47,35 @@ class RepoScanTest(SbTestCase):
         self.assertEqual(self.home.rows("SELECT COUNT(*) FROM repos"), [(3,)])
 
 
+class ScanInARunTest(SbTestCase):
+    """`sb repos scan` is an sb command: carrying a new `SB_RUN_ID`, it creates that run's record."""
+
+    def setUp(self) -> None:
+        self.home = self.make_home()
+        self.home.make_checkout("side-projects/alpha")
+        self.home.make_checkout("side-projects/beta")
+
+    def test_scan_with_sb_run_id_creates_the_run_record(self) -> None:
+        result = self.home.sb("repos", "scan", cwd=self.home.root, env={"SB_RUN_ID": "r1"})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.home.rows("SELECT run_id FROM runs"), [("r1",)])
+
+    def test_scan_with_sb_run_id_registers_each_checkout(self) -> None:
+        result = self.home.sb("repos", "scan", cwd=self.home.root, env={"SB_RUN_ID": "r1"})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.home.rows("SELECT name FROM repos ORDER BY name"), [("alpha",), ("beta",)]
+        )
+
+    def test_scan_without_sb_run_id_creates_no_run_record(self) -> None:
+        result = self.home.sb("repos", "scan", cwd=self.home.root)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.home.rows("SELECT run_id FROM runs"), [])
+
+
 class EmptySideProjectsTest(SbTestCase):
     def setUp(self) -> None:
         self.home = self.make_home()

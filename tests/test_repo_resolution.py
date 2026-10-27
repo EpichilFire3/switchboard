@@ -39,6 +39,40 @@ UNREGISTERED_CASES = (
 )
 
 RUN_ON_TICKET_5 = {"SB_RUN_ID": "r1", "SB_TICKET": "5"}
+RUN_WITHOUT_TICKET = {"SB_RUN_ID": "r1"}
+
+TICKET_REPOS = (
+    "SELECT repos.name, tickets.number FROM tickets JOIN repos ON repos.id = tickets.repo_id"
+)
+DECISION_REPOS = (
+    "SELECT repos.name, decisions.text FROM decisions JOIN repos ON repos.id = decisions.repo_id"
+)
+
+
+def registered_checkout_alpha(home: Home):
+    return home.side_projects / "alpha"
+
+
+SB_REPO_CWDS = (
+    ("from another registered checkout", registered_checkout_alpha),
+    ("from a directory outside any checkout", directory_outside_any_checkout),
+    ("from a checkout outside side-projects", checkout_outside_side_projects),
+)
+
+# (case, SB_REPO value, command). Every case also has an unregistered checkout `delta` on disk
+# under side-projects, and runs from the registered checkout `alpha`.
+SB_REPO_UNREGISTERED_CASES = (
+    ("status with an unknown name", "nosuch", ("status", "progress")),
+    ("decide with an unknown name", "nosuch", ("decide", "x")),
+    ("status naming a checkout added after the scan", "delta", ("status", "progress")),
+)
+
+TICKETLESS_UNREGISTERED_CASES = (
+    ("decide from a directory outside any checkout", directory_outside_any_checkout, ("decide", "x")),
+    ("decide from a checkout outside side-projects", checkout_outside_side_projects, ("decide", "x")),
+    ("status from a directory outside any checkout", directory_outside_any_checkout, ("status", "done")),
+    ("status from a checkout outside side-projects", checkout_outside_side_projects, ("status", "done")),
+)
 
 
 class WorktreeResolutionTest(SbTestCase):
@@ -114,6 +148,88 @@ class UnregisteredRepoTest(SbTestCase):
 
         self.assertNotEqual(result.returncode, 0, result.stderr)
         self.assertIn("sb repos scan", result.stderr)
+
+
+class TicketlessUnregisteredRepoTest(SbTestCase):
+    """A run command with no ticket still resolves its repo, so an unregistered one fails it."""
+
+    def test_ticketless_command_from_an_unregistered_directory_exits_non_zero_naming_repos_scan(
+        self,
+    ) -> None:
+        for case, make_cwd, args in TICKETLESS_UNREGISTERED_CASES:
+            with self.subTest(case):
+                home = self.registered_home("alpha")
+                cwd = make_cwd(home)
+
+                result = home.sb(*args, cwd=cwd, env=RUN_WITHOUT_TICKET)
+
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn("sb repos scan", result.stderr)
+
+    def test_ticketless_command_from_an_unregistered_directory_writes_nothing(self) -> None:
+        for case, make_cwd, args in TICKETLESS_UNREGISTERED_CASES:
+            with self.subTest(case):
+                home = self.registered_home("alpha")
+                cwd = make_cwd(home)
+                before = home.contents()
+
+                home.sb(*args, cwd=cwd, env=RUN_WITHOUT_TICKET)
+
+                self.assertEqual(home.contents(), before)
+
+
+class SbRepoResolutionTest(SbTestCase):
+    """`SB_REPO`, when set, is the repo, whatever the current directory."""
+
+    def test_sb_repo_names_the_repo_from_any_directory(self) -> None:
+        for case, make_cwd in SB_REPO_CWDS:
+            with self.subTest(case):
+                home = self.registered_home("alpha", "beta")
+                cwd = make_cwd(home)
+
+                result = home.sb(
+                    "status", "progress", cwd=cwd, env={**RUN_ON_TICKET_5, "SB_REPO": "beta"}
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(home.rows(TICKET_REPOS), [("beta", 5)])
+
+    def test_sb_repo_names_the_repo_a_ticketless_decision_records(self) -> None:
+        home = self.registered_home("alpha", "beta")
+
+        result = home.sb(
+            "decide", "x",
+            cwd=home.side_projects / "alpha", env={**RUN_WITHOUT_TICKET, "SB_REPO": "beta"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(home.rows(DECISION_REPOS), [("beta", "x")])
+
+    def test_sb_repo_naming_no_registered_repo_exits_non_zero_naming_repos_scan(self) -> None:
+        for case, value, args in SB_REPO_UNREGISTERED_CASES:
+            with self.subTest(case):
+                home = self.registered_home("alpha")
+                home.make_checkout("side-projects/delta")
+
+                result = home.sb(
+                    *args, cwd=home.side_projects / "alpha", env={**RUN_ON_TICKET_5, "SB_REPO": value}
+                )
+
+                self.assertNotEqual(result.returncode, 0, result.stderr)
+                self.assertIn("sb repos scan", result.stderr)
+
+    def test_sb_repo_naming_no_registered_repo_writes_nothing(self) -> None:
+        for case, value, args in SB_REPO_UNREGISTERED_CASES:
+            with self.subTest(case):
+                home = self.registered_home("alpha")
+                home.make_checkout("side-projects/delta")
+                before = home.contents()
+
+                home.sb(
+                    *args, cwd=home.side_projects / "alpha", env={**RUN_ON_TICKET_5, "SB_REPO": value}
+                )
+
+                self.assertEqual(home.contents(), before)
 
 
 if __name__ == "__main__":
