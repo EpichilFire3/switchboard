@@ -64,7 +64,8 @@ def utc_now() -> datetime:
 
 
 def stamp(clock: Clock) -> str:
-    return clock().isoformat(timespec="seconds")
+    # Stored times are UTC whatever offset the injected clock reports.
+    return clock().astimezone(UTC).isoformat(timespec="seconds")
 
 
 def create_run(conn: sqlite3.Connection, run_id: str, now: str) -> None:
