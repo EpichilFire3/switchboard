@@ -14,7 +14,7 @@ evidence behind it is in [tracker-report.md](tracker-report.md) (use-case report
 | --- | --- | --- |
 | Q1 | Backend | **Our own tracker on GitHub Issues + SQLite.** Do not adopt Beads, Task Master or CCPM. Build the best features of all three into it (§3) |
 | Q2 | Depth | `to-tickets` stays at 2 levels (epic → ticket). Only `sb split` creates a 3rd. A ticket with open sub-issues is a **container**: never ready itself, closed by `sweep` once its children are closed |
-| Q3 | Waiting on the owner | SQLite `questions` is the authority, plus an `awaiting-owner` label. **No GitHub issue per question.** The repos must not fill up with question issues |
+| Q3 | Waiting on the owner | SQLite `questions` is the only record: waiting on the owner is database-only, with no label and no comment on the ticket. **No GitHub issue per question.** The repos must not fill up with question issues. Revised 2026-10-27: the `awaiting-owner` and `q:*` labels this row first carried are dropped, because they coupled tickets to conversation. A ticket waiting on the owner looks ready on GitHub, and `/status` is where it shows |
 | Q4 | Metadata | **Labels, generously** ("the more tags the better"). The full set is in §2 |
 | Q5 | Split keys | `CR-03.1`, `CR-03.2`: a one-line title-rule change in epf3 `github.md` |
 | Q6 | Sizing | The agent proposes a size when it creates a ticket. The harness clamps it with deterministic signals. Anything bigger than M must be split. No LLM sizing pass |
@@ -28,14 +28,13 @@ All of these are created idempotently by `github.md`'s label step. A `★` marks
 
 | Family | Labels | Written by |
 | --- | --- | --- |
-| state | `in-progress`, `done` (existing); ★`awaiting-owner`, ★`parked` (stuck or held), ★`deferred` (with a `not-before` date in SQLite) | `sb-tick`, `sb-inbox`, `ship` |
+| state | `in-progress`, `done` (existing); ★`parked` (stuck or held), ★`deferred` (with a `not-before` date in SQLite) | `sb-tick`, `sb-inbox`, `ship` |
 | structure | `Epic` (existing); ★`container` (has open sub-issues; derived, but labelled so it is visible) | `to-tickets`, `sb split`, `sweep` |
 | origin | `discovered`, `retro` (existing); ★`harness` (created by switchboard, not by a person or a skill run in a terminal) | as today, plus `sb` |
 | size | ★`size:S`, ★`size:M` | `to-tickets`, `sb split`, clamped by `sb` |
 | type | ★`type:feature`, `type:bug`, `type:chore`, `type:spike`, `type:research`, `type:decision`. These stand in for GitHub issue types, which are org-only | `to-tickets`, `manage-tickets file/bug`, `sb split` |
 | priority | ★`prio:0` … `prio:3` | **owner only** (through `/prio`), mirrored from SQLite by the harness. Agents still never set priority (epf3 rule) |
 | stream | ★`stream:<name>`: parallel workstreams within a repo (Task Master "tags") | `to-tickets` (one per epic by default), `sb split` |
-| question | ★`q:behaviour`, ★`q:architecture`, ★`q:gate`: the kinds of open questions on the ticket | `sb ask` / `sb-inbox` |
 | area | `area:<x>` or the repo's existing family | the epf3 rule is "choose, never create". **Proposed change:** allow creating `area:<x>` when the recon map names the area, so labels can grow with the codebase |
 | lane | ★`lane:<skill>`: the epf3 skill the next run starts (`implement`, `implement-tests`, `run-tests`, `ship`, `diagnose`, …), from the last `Next:` line | `sb-tick` |
 
@@ -53,7 +52,7 @@ harness or not, so it goes into `epf3-skills` (`manage-tickets`, `github.md`, `t
 | Feature (Beads) | Our version | Lives in |
 | --- | --- | --- |
 | `bd ready --explain` | `sb ready --explain [repo]`: for every open ticket, *why* it is or isn't ready (blocked by #n, awaiting qid, container, discovered and not accepted, parked, deferred until, claimed by run r). A pure function over the snapshot plus SQLite, with no API calls. It feeds `/status`, the digest and the dashboard | switchboard; epf3 gets a `frontier --explain` jq variant |
-| Gates (`bd gate`: human, timer, CI, PR) | Human is done (`questions` + `awaiting-owner`). **Add** `not-before` (timer), `waits-ci:<run>` and `waits-pr:<n>` (merged) gates in SQLite. `sb-tick` resolves them deterministically from `gh run view` / `gh pr view`. Check the Beads gate types in `BD/docs/workflows/gates.md` | switchboard |
+| Gates (`bd gate`: human, timer, CI, PR) | Human is done (`questions` in SQLite, no label). **Add** `not-before` (timer), `waits-ci:<run>` and `waits-pr:<n>` (merged) gates in SQLite. `sb-tick` resolves them deterministically from `gh run view` / `gh pr view`. Check the Beads gate types in `BD/docs/workflows/gates.md` | switchboard |
 | Atomic claim with lease and heartbeat | SQLite `claims(ticket, run_id, lease_until)`. The lease is extended on every PostToolUse hook call. `sb boot` and every tick release expired leases and flag the run as killed. The GitHub `in-progress` label mirrors the claim | switchboard |
 | Dependency kinds beyond `blocks` and `parent-child` | Non-blocking links as markers in the ticket body: `<!-- epf3:link kind=discovered-from\|caused-by\|related\|supersedes\|validates ref=#n -->`. The snapshot query reads bodies already, so this costs nothing extra. `caused-by` gives a bug its origin; `validates` ties test tickets to features | epf3 (`github.md`) |
 | `bd create --graph plan.json` (atomic graph create) | **One plan format and one publisher** for `to-tickets` and `sb split`: `plan.json` (nodes with key, title, body, labels, parent key; edges with blocker and blocked keys). `tickets-apply.py` publishes it idempotently: marker lookup, create the missing nodes, add the missing edges, read back, repair. **This saves tokens**: today the agent runs every `gh` call itself; after this it writes one JSON and runs one command | epf3 (`manage-tickets/tickets-apply.py`), called by `sb split` |
@@ -91,13 +90,11 @@ Town orchestration), the HTTP backend.
 ## 4. Build order
 
 1. **epf3 (general, any repo):** the label set (§2), the link markers, `## Verify` and
-   `## Touches` in the ticket template, the `CR-03.1` key rule, the `question` and `answer`
-   comment kinds, containers in `sweep`, and `tickets-apply.py` with `plan.json` and the cycle
-   check. `to-tickets` switches to writing `plan.json` and calling the publisher.
+   `## Touches` in the ticket template, the `CR-03.1` key rule, containers in `sweep`, and
+   `tickets-apply.py` with `plan.json` and the cycle check. `to-tickets` switches to writing `plan.json` and calling the publisher.
 2. **switchboard:** the `Tracker` adapter (snapshot query, ready predicate, `--explain`), the
    SQLite tables (`questions`, `claims`, `gates`, `decisions`, `snapshots`, `outbox`),
-   `sb split` (caps, plan validation, `Touches` disjointness) and `sb ask` / `sb-inbox` label
-   flips.
+   `sb split` (caps, plan validation, `Touches` disjointness).
 3. **switchboard:** the extra gate types, the size clamp, `sb graph`, `sb standup`,
    `sb remember`, epic compaction.
 

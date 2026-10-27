@@ -210,11 +210,14 @@ static prefix if any session in the same setup ran within the hour, so the cold 
 ## 9. Keeping WSL alive
 
 - `[wsl2] vmIdleTimeout` (ms, default 60000) governs the whole VM, not the distro.
-- `[general] instanceIdleTimeout` (ms, default 15000, `-1` disables) governs the distro, which
-  otherwise stops ~15 s after the last `wsl.exe` session or process ends.
+- `[general] instanceIdleTimeout` (ms, default 15000, `-1` disables) would govern the distro,
+  which stops ~15 s after the last `wsl.exe` session or process ends. **Correction 2026-10-27:**
+  it needs WSL 2.5.4 or later. This machine has WSL 2.3.26, so the setting is not available here
+  and the ~15 s is fixed.
 - **systemd services and lingering users do not count as activity** (Microsoft docs; WSL issues
   #8854, #13416). A systemd user unit alone cannot keep `sb-inbox` alive, and #13416 (still open)
-  reports the distro stopping even with `instanceIdleTimeout` settings in place on some versions.
+  reports the distro stopping even with `instanceIdleTimeout` settings in place on some versions
+  (setting needs WSL 2.5.4 or later, per the correction below).
 - What keeps a distro alive is a process attached to a `wsl.exe` session, e.g. a logon task that
   runs `wsl.exe -d <distro> -- <long-running command>`.
 - A scheduled `wsl.exe -d <distro> -- cmd` cold-starts a stopped distro (standard behaviour, not
@@ -223,7 +226,9 @@ static prefix if any session in the same setup ran within the hour, so the cold 
 - This machine: `/etc/wsl.conf` has only `[boot] systemd=true`; there is no `.wslconfig`; linger
   is off.
 
-The candidate `.wslconfig` (not applied; needs a test on this machine):
+The candidate `.wslconfig` (not applied). **Correction 2026-10-27:** `instanceIdleTimeout` needs
+WSL 2.5.4 or later, so on this machine's 2.3.26 it can only be tested after a WSL upgrade, which
+is not required. Once there it is an optional extra layer, never the keep-alive.
 
 ```
 [general]
