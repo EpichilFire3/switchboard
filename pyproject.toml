@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "switchboard"
+version = "0.0.0"
+description = "Laptop harness that runs Claude Code across side projects and asks the owner on Telegram"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+sb = "switchboard.cli:main"
