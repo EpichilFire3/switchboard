@@ -7,6 +7,11 @@ Evidence key: **[src]** read in the cloned source, **[live]** run against the Gi
 laptop, **[docs]** the project's own docs or GitHub's docs, **[est]** my estimate,
 **[unverified]** not checked.
 
+**Annotation, 2026-10-27.** Phase 0 keeps questions, answers and ideas off GitHub. The
+`awaiting-owner` label and the `question` and `answer` comment kinds this report recommends were
+dropped; waiting on the owner is database-only. Each affected row below carries a note. The
+report is otherwise unchanged ([tracker.md](tracker.md) Q3).
+
 Source clones (read-only, gitignored): `tmp/eval-trackers/{beads,claude-task-master,ccpm}` in
 this repo, re-cloned 2026-10-25 at the commits below.
 In this doc they are written `BD/`, `TM/` and `CC/`. Beads is at `main` `b5881d73e`
@@ -54,12 +59,12 @@ block, so it doesn't distort the comparison.
 | Tree: epic → ticket → subtask | **Built-in.** Sub-issues, 100 per parent, 8 levels **[docs]** | **Built-in.** `parent-child` deps, hierarchical IDs `bd-x.1.2` **[src]** | **No.** 2 levels: `Subtask` has `subtasks?: never` (`TM/packages/tm-core/src/common/types/index.ts`). A 3rd level needs one tag per epic | PRD → epic → task, as files; sub-issue linking never runs (`CC/references/sync.md:48-68`) |
 | Ready set (no open blocker) | **Build ~30 + 80 adapter.** One GraphQL query per repo returns `issueDependenciesSummary.blockedBy` (open blockers), `parent`, `subIssuesSummary` and labels. Cost **3 points, 1.85 s** for 100 issues with bodies **[live]**. Or use the `-is:blocked` search qualifier, which means "has an open blocker" **[live]** | **Built-in.** `bd ready --json` with `--parent`, `--label`, `--exclude-label`, `--type`, `--exclude-type`, `--metadata-field k=v`, `--priority`, `-n`, `--sort`, `--explain` (`BD/docs/cli-reference/ready.md`). Gate types are excluded by default; **epics are not**, so pass `--exclude-type epic` (`BD/internal/storage/sqlbuild/ready.go:16`) | **Built-in.** `next` and `list --ready`. Only the literal status `done` satisfies a dependency (`TM/packages/tm-core/src/modules/tasks/services/task-service.ts:299-418`) | **Broken.** `next.sh` lists a task only when `depends_on` is empty (#1027) |
 | Ready set minus "waiting on owner" | **Build ~15.** A SQLite `questions` join, which the scheduler needs anyway for its score | **Built-in** via a human gate (next row) | **Config.** Status `blocked` or `deferred` is skipped by `next` | n/a |
-| Human-gate blocking and unblocking on an answer | **Build ~40.** `sb ask` writes the question row, adds label `awaiting-owner` and posts a `kind=question` comment. `sb-inbox` posts `kind=answer` and removes the label once the last blocking question is answered | **Built-in + glue ~25.** `bd gate create --type human --blocks <id> --reason …`, then `bd gate resolve <gate>`. The blocked bead leaves `bd ready` until then (`BD/docs/workflows/gates.md`). A qid↔gate map is still needed for Telegram | **Build ~20.** `set-status blocked`/`pending`; there is no gate object | n/a |
+| Human-gate blocking and unblocking on an answer | **Build ~40.** `sb ask` writes the question row, adds label `awaiting-owner` and posts a `kind=question` comment. `sb-inbox` posts `kind=answer` and removes the label once the last blocking question is answered *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* | **Built-in + glue ~25.** `bd gate create --type human --blocks <id> --reason …`, then `bd gate resolve <gate>`. The blocked bead leaves `bd ready` until then (`BD/docs/workflows/gates.md`). A qid↔gate map is still needed for Telegram | **Build ~20.** `set-status blocked`/`pending`; there is no gate object | n/a |
 | Claiming | **Config ~15.** Label `in-progress` plus a claim comment (epf3 rule). This is safe because `sb-tick` is the only claimer, behind `tick.lock` | **Built-in.** `bd update --claim` / `bd ready --claim` is atomic, with lease and heartbeat columns (`BD/internal/types/types.go`, "Leasing") | **None.** `in-progress` tasks are returned again | `status: in-progress` frontmatter |
 | Size / budget metadata | **Config ~10.** Labels `size:S` and `size:M`, written at creation and clamped into SQLite. Personal accounts have no issue fields: those are GA for **orgs only** (2026-07-02) **[docs]** | **Built-in.** `--estimate <min>` (`estimated_minutes`) and `--set-metadata size=S`, filterable in `ready` (`BD/docs/core-concepts/metadata.md`) | `metadata` exists (0.43.0), but is writable only through MCP with `TASK_MASTER_ALLOW_METADATA_UPDATES=true` | n/a |
 | Notes / handoff | **Harness files** (context packs). epf3 forbids progress comments, and that is right | `--append-notes`, `--design`, `--acceptance`, comments. The packs would still be files (4k-token cap, validation) | **LLM call per note.** `update-subtask` rewrites your note through the model (`TM/scripts/modules/task-manager/update-subtask-by-id.js:315-360`) | `updates/<N>/*.md` files |
 | Fan-out limits (§5) | **Build ~130.** GitHub's 100 per parent and 8 levels are too loose | **Build ~90.** `hierarchy.max-depth=3` exists as config but **is not enforced**: `CheckHierarchyDepth` has no non-test caller (`BD/internal/types/id_generator.go:110`). There is no children cap. `bd create --graph plan.json` creates nodes and edges atomically, which saves the creation code | **Not usable.** `expand --num` is prompt text and is never checked (`TM/scripts/modules/task-manager/expand-task.js:186-207, 337-342`) | Prose ("aim for ≤10 tasks") |
-| Decision log | **Build ~40.** SQLite `decisions`, a markdown mirror and a `kind=answer` comment | **Build ~25.** An issue type `decision` exists (`-t decision`, alias `adr`) | Build | n/a |
+| Decision log | **Build ~40.** SQLite `decisions`, a markdown mirror and a `kind=answer` comment *[Annotation 2026-10-27: the `question` and `answer` comment kinds were dropped; answers are database-only.]* | **Build ~25.** An issue type `decision` exists (`-t decision`, alias `adr`) | Build | n/a |
 | Discovered work, not ready until accepted | **Config.** epf3's `discovered` label, filtered out of the ready set | **Built-in.** A `discovered-from` dep, plus `--exclude-label discovered` | Build | n/a |
 | Phone-readable view | **Built-in.** GitHub Mobile shows sub-issues **[docs]**. Whether it shows blocked-by is **[unverified]** | **Config + caveats.** `bd github sync --push-only` pushes title, `description` as the body, state and scoped labels (`BD/internal/github/mapping.go:155-190`). Notes, acceptance, design and comments are not pushed. Relationship sync (epic/child → sub-issues, blocks → blocked_by) is **on `main` only, not in v1.3.2**, and it only adds links, never removes them (`BD/cmd/bd/github.go` `pushGitHubDependencyLinks`, commit `bcf4da3c6`) | **None** (a local JSON file) | Issues, without dependency links |
 | Commit linkage: `Closes: #N` closes the ticket | **Built-in** (GitHub closes the issue) | **Lost.** Build a trailer → `bd close` sweep, ~80 lines, and rework the `ship`/`manage-tickets` conventions. Bead IDs (`sb-a3f8`) replace `#412` in branch names | None | Partial |
@@ -81,7 +86,7 @@ block, so it doesn't distort the comparison.
 
 | Option | switchboard Python | epf3 skill changes | New ops surface |
 | --- | --- | --- | --- |
-| **GitHub + SQLite** | **~425 lines**, about 2 days with tests | **< 1 hour.** Add 3 labels (`awaiting-owner`, `size:S`, `size:M`), 2 comment kinds, the split key format, and container-ticket closing in `sweep` | None (`gh` ≥ 2.94 is already installed) |
+| **GitHub + SQLite** | **~425 lines**, about 2 days with tests | **< 1 hour.** Add 3 labels (`awaiting-owner`, `size:S`, `size:M`), 2 comment kinds, the split key format, and container-ticket closing in `sweep` *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* | None (`gh` ≥ 2.94 is already installed) |
 | **Beads + GH mirror** | **~345 lines**, about 1.5 days | **1.5 to 2.5 days.** Replace all 242 lines of `github.md`; rewrite every operation in `manage-tickets` (171 lines) and the publish half of `to-tickets`; touch 9 other skills that reference `gh issue` | Install and pin `bd` (CGO build); `bd init --stealth --skip-hooks --skip-agents` in each repo; backups (`bd backup` / Dolt remote); test every upgrade |
 | **Task Master** | ~400+ lines, and it still can't do depth 3 or write notes without an LLM or direct JSON edits | Full rewrite | Node toolchain; turn off Sentry (§4.3) |
 | **CCPM** | Build almost everything; its scripts are broken | Full rewrite | n/a |
@@ -238,8 +243,8 @@ interface.
 | Size | Label `size:S` / `size:M` (visible on the phone) and `tickets.size` in SQLite (clamped) | `to-tickets` (new: one label per ticket), `sb split` |
 | Priority | SQLite `tickets.priority` (epf3 forbids agents setting priority labels) | owner `/prio` |
 | Claimed / done | Labels `in-progress` / `done` + comments (epf3, unchanged) | `sb-tick` (claim), `ship` (done) |
-| Waiting on owner | SQLite `questions` (authority) + label `awaiting-owner` (visibility) + a `kind=question` comment per round | `sb ask` |
-| Owner answer | SQLite `questions.answer`, a `kind=answer` comment, `decisions` + `decisions.md` | `sb-inbox` |
+| Waiting on owner | SQLite `questions` (authority) + label `awaiting-owner` (visibility) + a `kind=question` comment per round *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* | `sb ask` |
+| Owner answer | SQLite `questions.answer`, a `kind=answer` comment, `decisions` + `decisions.md` *[Annotation 2026-10-27: the `question` and `answer` comment kinds were dropped; answers are database-only.]* | `sb-inbox` |
 | Sessions, cache clocks, runs, budgets, packs | SQLite + `~/.switchboard/packs/` | `sb-tick` (digest after each run; the Haiku handoff only before a cold start) |
 | Last snapshot per repo | SQLite `snapshots(repo, fetched_at, json)` | `sb-tick`; read by `/status` with no API call |
 
@@ -280,7 +285,7 @@ before relying on it (§7). `subIssuesSummary.completed/total` of the parent giv
 - it has no `Epic` label;
 - `blockedBy == 0`;
 - it has no open sub-issues (`total - completed == 0`), so it is not a container;
-- it has neither `done` nor `discovered` (unless accepted in SQLite) nor `awaiting-owner`;
+- it has neither `done` nor `discovered` (unless accepted in SQLite) nor `awaiting-owner`; *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]*
 - if it is `in-progress`, SQLite must show `sb-tick` as the claimer. This excludes tickets you
   claimed from VSCode.
 
@@ -290,8 +295,8 @@ over the stuck threshold.
 | Event | Calls (in order, one at a time, read back per epf3) |
 | --- | --- |
 | First dispatch | `gh issue edit N --add-label in-progress`; `gh issue comment N --body-file` (`kind=claim`) |
-| `sb ask` (blocking) | INSERT `questions`; `gh issue edit N --add-label awaiting-owner`; one `kind=question` comment per round with the Telegram link |
-| Answer arrives | UPDATE `questions`; `kind=answer` comment; once no blocking question remains, `gh issue edit N --remove-label awaiting-owner`; INSERT `decisions` |
+| `sb ask` (blocking) | INSERT `questions`; `gh issue edit N --add-label awaiting-owner`; one `kind=question` comment per round with the Telegram link *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* |
+| Answer arrives | UPDATE `questions`; `kind=answer` comment; once no blocking question remains, `gh issue edit N --remove-label awaiting-owner`; INSERT `decisions` *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* |
 | `sb split` | Validate (§5); for each child, `gh issue create --parent N --label size:X,<area> --body-file` with marker `<!-- epf3:ticket spec=<slug> key=<KEY>.<i> -->`; `gh issue edit <child> --add-blocked-by <m>` for each link; read-back; the parent becomes a container |
 | Done / close | Unchanged: `ship` labels `done`; the `Closes:` trailer closes; `sweep` also closes containers whose children are all closed |
 
@@ -316,14 +321,14 @@ independent of the backend, so a future switch only touches `tracker/*.py` and e
   fails (zero tokens).
 - **Consistency rules (~50 lines):** the existing "tracker/DB disagreement" table, e.g. the issue
   is closed but SQLite says ready, or `awaiting-owner` is set but no question is pending. Both
-  repair deterministically.
+  repair deterministically. *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]*
 
 ### 6.6 epf3 edits (under an hour)
 
 - `github.md`: three labels (`awaiting-owner`, `size:S`, `size:M`) and the snapshot query beside
-  the existing frontier `jq`.
+  the existing frontier `jq`. *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]*
 - `manage-tickets`: comment kinds `question` and `answer` (already proposed in
-  skills-extensions §3.4), and `sweep` step 3 extended to containers.
+  skills-extensions §3.4), and `sweep` step 3 extended to containers. *[Annotation 2026-10-27: the `question` and `answer` comment kinds were dropped; answers are database-only.]*
 - `to-tickets`: one `size:*` label per ticket.
 
 ---
@@ -333,7 +338,7 @@ independent of the backend, so a future switch only touches `tracker/*.py` and e
 | # | Check | How | If it fails |
 | --- | --- | --- | --- |
 | 1 | `issueDependenciesSummary.blockedBy` counts **open** blockers only | Close a blocker on a scratch epf3 issue and re-query | Add `blockedBy(first:20){nodes{state}}` to the query (still 3 points) |
-| 2 | GitHub Mobile shows sub-issue progress and blocked-by **[unverified]** | Look on the phone | The `awaiting-owner` label and the epic's ticket list carry the information; the digest covers the rest |
+| 2 | GitHub Mobile shows sub-issue progress and blocked-by **[unverified]** | Look on the phone | The `awaiting-owner` label and the epic's ticket list carry the information; the digest covers the rest *[Annotation 2026-10-27: the `awaiting-owner` label was dropped, with the `question` and `answer` comment kinds; waiting on the owner is database-only.]* |
 | 3 | Partial `sb split` (create succeeded, link failed) re-runs cleanly | Kill it mid-split in a test repo | Marker lookup + read-back repair, as `to-tickets` does already |
 | 4 | Two spec contradictions | Resolved 2026-10-24 | (a) Depth: `to-tickets` stays at 2 levels; only `sb split` creates level 3 (scheduler.md §5). (b) Handoff: the harness writes it after the run with Haiku 5.5 low, outside the run's budget, and only before a cold start (prompt-cache.md §3.5). The scheduler and prompt-cache docs now say so |
 | 5 | Owner's own interactive claims aren't picked up by ticks | Claim a ticket from VSCode, run `sb-tick --dry-run` | The ready predicate already requires a SQLite claim row |

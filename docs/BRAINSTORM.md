@@ -34,8 +34,9 @@ logs exist.
    stops ~15 s after the last `wsl.exe`-attached process ends, systemd services do not count as
    activity, and `vmIdleTimeout` is the VM's setting, not the distro's. Whatever the clock,
    something Windows-side must hold a `wsl.exe` session open for `sb-inbox` (candidate: run
-   `sb-inbox` itself from a logon task). Open: does `instanceIdleTimeout=-1` hold on this WSL
-   (2.3.26; issue #13416)? What happens to a run when the lid closes mid-run?
+   `sb-inbox` itself from a logon task). Open: does `instanceIdleTimeout=-1` hold (issue #13416)?
+   Correction 2026-10-27: the setting needs WSL 2.5.4 or later, and this machine has 2.3.26, so it
+   cannot be tried here without an upgrade. What happens to a run when the lid closes mid-run?
 6. **Auto-advance policy for epf3's `Next:` chain.** Which steps run on their own and which need
    a tap. Merge and production are never automatic ([skills-extensions.md](skills-extensions.md) §2–3.2).
    Brainstorm this *with the epf3-skills repo open*.

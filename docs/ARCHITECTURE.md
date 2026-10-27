@@ -32,7 +32,7 @@ about sessions, caches or budgets, and should not.
 | `runs` | `run_id`, ticket, start/end, mode (`fresh`/`resume`/`resume-cold`), exit reason, usage fields, cost-equivalent, outcome, final `Next:`/`Gate:` lines, digest path, `handoff_built` |
 | `questions` | `qid`, ticket, `run_id`, category, urgency, blocking, round, status, answer, `answered_at` |
 | `tg_map` | (`chat_id`, `message_id`) → kind + ref (question, digest item, idea, ticket) |
-| `ideas` | text, source message, rung that routed it, repo, kind, status |
+| `ideas` | text, source message, rung that routed it, repo, lane, status |
 | `decisions` | repo, ticket, text, source (owner answer / agent), at |
 | `usage_snapshots` | at, source (`rate_limit_event` / `/usage`), five-hour %, seven-day %, reset times, status |
 | `kv` | Telegram offset, `paused_until`, cursors |
@@ -164,20 +164,46 @@ it through the owner-active gate (§3).
 ## 6. Windows + WSL automation
 
 **What WSL does on its own** ([verification.md](verification.md) §9). The distro stops ~15 s
-after the last process attached to a `wsl.exe` session ends (`[general] instanceIdleTimeout`,
-default 15000 ms), and the VM follows (`[wsl2] vmIdleTimeout`, default 60000 ms). **systemd
+after the last process attached to a WSL session ends, and the VM follows about a minute later.
+The settings that tune those delays (`[general] instanceIdleTimeout`, `[wsl2] vmIdleTimeout`)
+need WSL 2.5.4 or later. This machine has 2.3.26, so nothing here depends on them. **systemd
 services and lingering users do not count as activity**, so a systemd unit cannot keep itself, or
-WSL, alive. A process started through `wsl.exe` does. A `wsl.exe` call cold-starts a stopped
-distro, and systemd comes up with it (`[boot] systemd=true` is already set on this machine).
+WSL, alive. A process started through `wslg.exe` or `wsl.exe` does. Either one cold-starts a
+stopped distro, and systemd comes up with it (`[boot] systemd=true` is already set on this
+machine).
 
-So whatever runs the clock, something Windows-side must hold a `wsl.exe` session open while
-`sb-inbox` is meant to be up. The natural candidate is to make `sb-inbox` that process:
+So whatever runs the clock, something Windows-side must hold a WSL session open while `sb-inbox`
+is meant to be up. That process is `sb-inbox` itself, started through `wslg.exe`: it opens no
+console window, where `wsl.exe` opens one, and it needs no VBScript wrapper, `conhost --headless`
+or hidden PowerShell (each flashes a window). `wslg.exe` discards stdout and stderr, so
+`sb-inbox` logs only to its size-rotated log file.
 
 | Task | Where | Definition |
 | --- | --- | --- |
-| Inbox daemon, which also keeps WSL alive | Task Scheduler, *at logon* and *on workstation unlock*, restart on failure, "don't start a new instance" | `wsl.exe -d <distro> -u <user> -- ~/.local/bin/sb-inbox`. It runs `sb boot` first, once per WSL start |
+| Inbox daemon, which also keeps WSL alive | One Task Scheduler task. Triggers: at logon, on workstation unlock, and repeat every 10 minutes indefinitely. `sb install-task` registers it as the current user, without admin rights | `wslg.exe -d <distro> -u <user> -- <absolute path to sb-inbox>`. It runs `sb boot` first, once per WSL start |
 | Tick | Task Scheduler every 30 min, **or** a systemd timer in WSL | Task Scheduler: `wsl.exe -d <distro> -u <user> -- ~/.local/bin/sb-tick`, "start only on AC power" (optional), "don't start a new instance", "run as soon as possible after a missed start" **off** |
-| Idle settings | `%UserProfile%\.wslconfig` | `[general] instanceIdleTimeout=-1` and `[wsl2] vmIdleTimeout=-1` as a second line of defence. Not applied yet; WSL issue #13416 reports the distro stopping anyway on some versions, so test it |
+| Idle settings | `%UserProfile%\.wslconfig` | Optional extra layer, never the keep-alive. `[general] instanceIdleTimeout=-1` and `[wsl2] vmIdleTimeout=-1` only exist from WSL 2.5.4, and WSL issue #13416 reports the distro stopping anyway on some versions, so test it once there. Not applied |
+
+The inbox task is set explicitly, not left to defaults:
+
+- run only when the user is logged on, as the owner (not "whether logged on or not": that runs in
+  session 0, where WSL does not start)
+- no execution time limit
+- start and keep running on battery
+- start when available after a missed start
+- ignore a new instance while one runs, so a trigger that fires while `sb-inbox` is up does
+  nothing
+
+**Two layers of restart.** Task Scheduler's restart-on-failure is not used: it most likely never
+fires after a launched process exits.
+
+1. **Inside WSL**, `sb-inbox` is the supervisor. It takes the single-instance lock for its
+   lifetime and runs the poller as its child. When the poller exits, the supervisor restarts it
+   after 1 s, doubling to 60 s on consecutive crashes, until the crash-loop rule backs it off to
+   one restart every 5 minutes.
+2. **Inside Windows**, the 10-minute repeat trigger restarts everything the supervisor cannot:
+   `wsl --shutdown`, a WSL update, or the supervisor dying. The task instance ends with the
+   session, and the next trigger starts a new one, so recovery takes at most 10 minutes.
 
 Linger is off on this machine and is not needed if nothing runs as a systemd user unit. Which
 clock drives the tick is the owner's call ([BRAINSTORM.md](BRAINSTORM.md) A5). Task Scheduler
@@ -259,7 +285,7 @@ reason it fired, so the thresholds can be tuned until the fallback rarely runs.
 | Deterministic step | Becomes unsure when | Fallback | Then |
 | --- | --- | --- | --- |
 | Idea routing (L0–L2) | BM25 below thresholds | L3 router | Owner buttons, then `/triage` on the verbatim message in switchboard's slot |
-| Lane/kind detection | No regex cue | L3 JSON `kind` | `/brainstorm` |
+| Lane detection | No regex cue | L3 JSON `lane` | `/brainstorm` |
 | Handoff for a cold start | Always needs synthesis (it is not deterministic) | Haiku writes it from the digest, lazily | Validation fails twice: `HARNESS` message |
 | Free-text answer to a button question | Text doesn't name an option | Haiku maps text → option or "custom" | Stored as custom; the agent reads it verbatim |
 | Tracker/DB disagreement | Issue closed but harness says ready, etc. | Rule table first; Haiku only for unclassified cases | `HARNESS` message |
