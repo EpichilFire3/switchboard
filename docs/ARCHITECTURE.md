@@ -27,7 +27,7 @@ about sessions, caches or budgets, and should not.
 | Table | Key columns |
 | --- | --- |
 | `repos` | name, path, gh `nameWithOwner`, `topic_id`, `vruntime`, `last_run_at`, enabled, lane model |
-| `tickets` | repo, number, size, priority, `session_id`, `pack_path`, runs, `no_progress_runs`, harness status (`queued`/`ready`/`blocked`/`parked`) |
+| `tickets` | repo, number, size, priority, `session_id`, `pack_path`, runs, `no_progress_runs`, harness status (`queued`/`ready`/`blocked`/`parked`), the two block causes `questions` and `reported` (blocked while either is set), last reported status and reason |
 | `sessions` | `session_id`, repo, ticket, model, `last_request_at`, `ttl_seconds`, `context_tokens` |
 | `runs` | `run_id`, ticket, start/end, mode (`fresh`/`resume`/`resume-cold`), exit reason, usage fields, cost-equivalent, outcome, final `Next:`/`Gate:` lines, digest path, `handoff_built` |
 | `questions` | `qid`, ticket, `run_id`, category, urgency, blocking, round, status, answer, `answered_at` |
@@ -39,7 +39,9 @@ about sessions, caches or budgets, and should not.
 
 **Files:** `~/.switchboard/packs/<repo>/<ticket>.md` (context packs),
 `~/.switchboard/log/decisions.md` (the decision log mirrored as readable markdown),
-`~/.switchboard/config.toml`, `~/.switchboard/jobs.yaml`, `~/.switchboard/secrets.env`.
+`~/.switchboard/config.toml`, `~/.switchboard/jobs.yaml`, `~/.switchboard/secrets.env`,
+`~/.switchboard/switchboard.lock` (held while a process opens the database and migrates it, so
+concurrent first opens do not race the switch to WAL).
 
 ## 3. Running Claude Code
 
@@ -249,7 +251,7 @@ switchboard/
   pyproject.toml                 # uv; deps: httpx, rank-bm25, pydantic, tomli (stdlib on 3.11+)
   preamble/harness.md            # static tick protocol, appended to the system prompt
   src/switchboard/
-    cli.py                       # sb: ask, status, decide, split, pause, boot, doctor
+    cli.py                       # sb: ask, status, decide, repos scan, split, pause, boot, doctor
     config.py  db.py             # config.toml; SQLite schema + migrations
     tracker/  base.py github.py  # Tracker adapter; gh-backed implementation, epf3 markers
     claude/   invoke.py          # argv builder, timeout, SIGTERM/SIGKILL
