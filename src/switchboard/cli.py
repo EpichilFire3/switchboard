@@ -4,13 +4,15 @@ import re
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple, NoReturn
 
 from switchboard import db
+
+Clock = Callable[[], datetime]
 
 STATUSES = ("progress", "blocked", "done", "needs-split")
 
@@ -24,6 +26,7 @@ class Parser(argparse.ArgumentParser):
 class Run(NamedTuple):
     conn: sqlite3.Connection
     id: str
+    repo_id: int
     ticket_id: int | None
     now: str
 
@@ -56,37 +59,51 @@ def resolve_repo(conn: sqlite3.Connection) -> int:
     return row[0]
 
 
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def stamp(clock: Clock) -> str:
+    return clock().isoformat(timespec="seconds")
+
+
+def create_run(conn: sqlite3.Connection, run_id: str, now: str) -> None:
+    conn.execute(
+        "INSERT INTO runs (run_id, first_seen) VALUES (?, ?) ON CONFLICT DO NOTHING", (run_id, now)
+    )
+
+
 @contextmanager
-def open_run(args: argparse.Namespace) -> Iterator[Run]:
+def open_run(command: str, ticket: int | None, clock: Clock) -> Iterator[Run]:
     run_id = os.environ.get("SB_RUN_ID")
     if not run_id:
-        sys.exit(f"sb {args.command}: not a harness run: SB_RUN_ID is unset")
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+        sys.exit(f"sb {command}: not a harness run: SB_RUN_ID is unset")
+    now = stamp(clock)
     with closing(db.connect()) as conn:
-        repo_id = resolve_repo(conn) if args.ticket else None
+        repo_id = resolve_repo(conn)
         with db.transaction(conn):
-            conn.execute(
-                "INSERT INTO runs (run_id, first_seen) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                (run_id, now),
-            )
+            create_run(conn, run_id, now)
             ticket_id = None
-            if repo_id is not None:
-                key = (repo_id, args.ticket)
+            if ticket is not None:
+                key = (repo_id, ticket)
                 conn.execute(
                     "INSERT INTO tickets (repo_id, number) VALUES (?, ?) ON CONFLICT DO NOTHING", key
                 )
                 ticket_id = conn.execute(
                     "SELECT id FROM tickets WHERE repo_id = ? AND number = ?", key
                 ).fetchone()[0]
-            yield Run(conn, run_id, ticket_id, now)
+            yield Run(conn, run_id, repo_id, ticket_id, now)
 
 
-def scan_repos(args: argparse.Namespace) -> None:
+def scan_repos(args: argparse.Namespace, clock: Clock) -> None:
     root = Path.home() / "side-projects"
     if not root.is_dir():
         sys.exit(f"sb repos scan: {root} does not exist")
     added = []
+    run_id = os.environ.get("SB_RUN_ID")
     with closing(db.connect()) as conn, db.transaction(conn):
+        if run_id:
+            create_run(conn, run_id, stamp(clock))
         for child in sorted(root.iterdir()):
             # A linked worktree has a .git file and resolves to its parent repo; it is not a repo.
             if not (child / ".git").is_dir():
@@ -101,16 +118,17 @@ def scan_repos(args: argparse.Namespace) -> None:
         print(f"registered {name}")
 
 
-def record_decision(args: argparse.Namespace) -> None:
-    with open_run(args) as run:
+def record_decision(args: argparse.Namespace, clock: Clock) -> None:
+    with open_run(args.command, args.ticket, clock) as run:
         run.conn.execute(
-            "INSERT INTO decisions (run_id, ticket_id, text, source, at) VALUES (?, ?, ?, 'agent', ?)",
-            (run.id, run.ticket_id, args.text, run.now),
+            """INSERT INTO decisions (run_id, repo_id, ticket_id, text, source, at)
+                VALUES (?, ?, ?, ?, 'agent', ?)""",
+            (run.id, run.repo_id, run.ticket_id, args.text, run.now),
         )
 
 
-def report_status(args: argparse.Namespace) -> None:
-    with open_run(args) as run:
+def report_status(args: argparse.Namespace, clock: Clock) -> None:
+    with open_run(args.command, args.ticket, clock) as run:
         run.conn.execute(
             "UPDATE runs SET reported_status = ?, reported_reason = ? WHERE run_id = ?",
             (args.status, args.reason, run.id),
@@ -148,6 +166,6 @@ def build_parser() -> Parser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, clock: Clock = utc_now) -> None:
     args = build_parser().parse_args(argv)
-    args.handler(args)
+    args.handler(args, clock)

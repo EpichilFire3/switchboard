@@ -35,6 +35,7 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """CREATE TABLE decisions (
             id INTEGER PRIMARY KEY,
             run_id TEXT REFERENCES runs (run_id),
+            repo_id INTEGER NOT NULL REFERENCES repos (id),
             ticket_id INTEGER REFERENCES tickets (id),
             text TEXT NOT NULL,
             source TEXT NOT NULL CHECK (source IN ('agent', 'owner')),
