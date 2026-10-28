@@ -131,7 +131,7 @@ def install_task(args: argparse.Namespace, clock: Clock) -> None:
     # No resolve(): a tool install links sb-inbox from ~/.local/bin into its own venv, and the
     # task must keep the stable link, not the venv path an upgrade replaces.
     task.register(distro, getpass.getuser(), Path(inbox).absolute())
-    print(f"registered task {task.TASK_NAME}")
+    print(f"registered task {task.NAME}")
 
 
 def record_decision(args: argparse.Namespace, clock: Clock) -> None:

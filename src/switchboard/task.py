@@ -3,10 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-TASK_NAME = "sb-inbox"
+NAME = "sb-inbox"
 
-# Run by Windows PowerShell 5.1 (powershell.exe, the one interop can reach). $distro, $wslUser and
-# $inbox are defined ahead of it by definition_script.
+# Run by Windows PowerShell 5.1 (powershell.exe, the one interop can reach). register() defines
+# $taskName, $distro, $wslUser and $inbox ahead of it.
 DEFINITION = r"""
 $ErrorActionPreference = 'Stop'
 $owner = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -24,15 +24,11 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -S
 """
 
 
-def quote(text: str) -> str:
-    return "'" + text.replace("'", "''") + "'"
-
-
 def register(distro: str, wsl_user: str, inbox: Path) -> None:
     variables = "".join(
-        f"${name} = {quote(value)}\n"
+        f"${name} = '{value.replace("'", "''")}'\n"
         for name, value in (
-            ("taskName", TASK_NAME),
+            ("taskName", NAME),
             ("distro", distro),
             ("wslUser", wsl_user),
             ("inbox", str(inbox)),
