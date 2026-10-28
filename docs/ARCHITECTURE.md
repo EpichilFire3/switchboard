@@ -253,7 +253,7 @@ switchboard/
   pyproject.toml                 # uv; deps: httpx, rank-bm25, pydantic, tomli (stdlib on 3.11+)
   preamble/harness.md            # static tick protocol, appended to the system prompt
   src/switchboard/
-    cli.py                       # sb: ask, status, decide, repos scan, split, pause, boot, doctor
+    cli.py                       # sb: ask, status, decide, repos scan, setup telegram, split, pause, boot, doctor
     config.py  db.py             # config.toml; SQLite schema + migrations
     telegram.py                  # Bot API client over an injected transport; the single-poller lock
     fake_telegram.py             # the fake Bot API every test runs against, in place of the network
