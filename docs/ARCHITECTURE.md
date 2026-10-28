@@ -251,8 +251,9 @@ switchboard/
   pyproject.toml                 # uv; deps: httpx, rank-bm25, pydantic, tomli (stdlib on 3.11+)
   preamble/harness.md            # static tick protocol, appended to the system prompt
   src/switchboard/
-    cli.py                       # sb: ask, status, decide, repos scan, split, pause, boot, doctor
+    cli.py                       # sb: ask, status, decide, repos scan, install-task, split, pause, boot, doctor
     config.py  db.py             # config.toml; SQLite schema + migrations
+    task.py                      # sb install-task: registers the sb-inbox task through powershell.exe
     tracker/  base.py github.py  # Tracker adapter; gh-backed implementation, epf3 markers
     claude/   invoke.py          # argv builder, timeout, SIGTERM/SIGKILL
               transcript.py      # parse stream-json + ~/.claude/projects JSONL: usage, TTL, files edited, rate_limit_event
@@ -262,7 +263,7 @@ switchboard/
     hooks/    budget_post.py budget_pre.py stop_final.py
     fallback.py                  # the one place that spawns cheap LLM resolver sessions
   deploy/
-    windows/  register-tasks.ps1 # creates the Task Scheduler tasks (sb-inbox at logon; the tick, if it is the clock)
+    windows/  register-tasks.ps1 # the tick's task, if it is the clock (sb-inbox's task is sb install-task)
     wsl/      wslconfig.example  # the idle settings of §6
   tests/
 ```
