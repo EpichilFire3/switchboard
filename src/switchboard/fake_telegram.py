@@ -78,12 +78,20 @@ def visible_text(text: str) -> str:
     return html.unescape(re.sub(r"<[^<>]*>", "", text))
 
 
+def param[T](params: Json, name: str, kind: type[T]) -> T | None:
+    """A request parameter, None when absent, or BadRequest when it has the wrong JSON type."""
+    value = params.get(name)
+    if value is None or isinstance(value, kind):
+        return value
+    raise BadRequest(f'field "{name}" must be of type {kind.__name__}')
+
+
 class FakeBotApi:
     def __init__(self, token: str, username: str = "switchboard_test_bot") -> None:
         self.token = token
         self.username = username
         self.chats: dict[int, FakeChat] = {}
-        self.updates: list[Json] = []
+        self.updates: list[tuple[int, Json]] = []
         self.last_update_id = 0
         # Every request in order, refused ones included: (method, parameters).
         self.requests: list[tuple[str, Json]] = []
@@ -102,14 +110,14 @@ class FakeBotApi:
         message = FakeMessage(chat.next_message_id(), sender_id, text, thread_id)
         chat.messages[message.id] = message
         self.last_update_id += 1
-        self.updates.append(
-            {"update_id": self.last_update_id, "message": self._message_json(chat, message)}
-        )
+        update = {"update_id": self.last_update_id, "message": self._message_json(chat, message)}
+        self.updates.append((self.last_update_id, update))
         return message
 
     def __call__(self, request: urllib.request.Request, timeout: float) -> tuple[int, bytes]:
         token, _, method = request.full_url.removeprefix(f"{API}/bot").rpartition("/")
-        params = json.loads(request.data or b"{}")
+        body = json.loads(request.data) if isinstance(request.data, bytes) else {}
+        params: Json = body if isinstance(body, dict) else {}
         self.requests.append((method, params))
         if urllib.parse.unquote(token) != self.token:
             return self._refusal(401, "Unauthorized")
@@ -133,13 +141,16 @@ class FakeBotApi:
         return status, json.dumps(body).encode()
 
     def _chat(self, params: Json) -> FakeChat:
-        chat = self.chats.get(params.get("chat_id"))
+        chat_id = param(params, "chat_id", int)
+        chat = None if chat_id is None else self.chats.get(chat_id)
         if chat is None:
             raise BadRequest("chat not found")
         return chat
 
     def _message_json(self, chat: FakeChat, message: FakeMessage) -> Json:
-        chat_json = {"id": chat.id, "type": chat.type} | ({"is_forum": True} if chat.is_forum else {})
+        chat_json: Json = {"id": chat.id, "type": chat.type}
+        if chat.is_forum:
+            chat_json["is_forum"] = True
         body: Json = {
             "message_id": message.id,
             "date": 0,
@@ -158,31 +169,34 @@ class FakeBotApi:
 
     def _get_updates(self, params: Json) -> list[Json]:
         # A higher offset confirms every update below it, and Telegram forgets those.
-        offset = params.get("offset", 0)
-        self.updates = [update for update in self.updates if update["update_id"] >= offset]
-        return list(self.updates)
+        offset = param(params, "offset", int) or 0
+        self.updates = [(number, update) for number, update in self.updates if number >= offset]
+        return [update for _, update in self.updates]
 
     def _create_forum_topic(self, params: Json) -> Json:
         chat = self._chat(params)
         if not chat.is_forum:
             raise BadRequest("the chat is not a forum")
+        name = param(params, "name", str)
+        if not name:
+            raise BadRequest("topic name is empty")
         topic = chat.next_message_id()
-        chat.topics[topic] = params["name"]
-        return {"message_thread_id": topic, "name": params["name"], "icon_color": 7322096}
+        chat.topics[topic] = name
+        return {"message_thread_id": topic, "name": name, "icon_color": 7322096}
 
     def _send_message(self, params: Json) -> Json:
         chat = self._chat(params)
-        thread_id = params.get("message_thread_id")
+        thread_id = param(params, "message_thread_id", int)
         if thread_id is not None and thread_id not in chat.topics:
             raise BadRequest("message thread not found")
-        text = params.get("text", "")
+        text = param(params, "text", str) or ""
         shown = visible_text(text) if params.get("parse_mode") == "HTML" else text
         if not shown.strip():
             raise BadRequest("message text is empty")
         # Telegram counts UTF-16 code units of the text left after entity parsing.
         if len(shown.encode("utf-16-le")) // 2 > MAX_TEXT:
             raise BadRequest("message is too long")
-        markup = params.get("reply_markup")
+        markup = param(params, "reply_markup", dict)
         for row in (markup or {}).get("inline_keyboard", []):
             for button in row:
                 data = button.get("callback_data")
@@ -193,8 +207,11 @@ class FakeBotApi:
         return self._message_json(chat, message)
 
     def _set_message_reaction(self, params: Json) -> bool:
-        message = self._chat(params).messages.get(params.get("message_id"))
+        messages = self._chat(params).messages
+        message_id = param(params, "message_id", int)
+        message = None if message_id is None else messages.get(message_id)
         if message is None:
             raise BadRequest("message to react not found")
-        message.reactions = [reaction["emoji"] for reaction in params.get("reaction", [])]
+        reactions = param(params, "reaction", list) or []
+        message.reactions = [reaction["emoji"] for reaction in reactions]
         return True
