@@ -5,6 +5,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
@@ -17,6 +18,8 @@ from switchboard import db, telegram
 Clock = Callable[[], datetime]
 
 STATUSES = ("progress", "blocked", "done", "needs-split")
+# The spec's first reconnect delay for the poller, reused while setup re-reads a queue it has seen.
+REPOLL_SECONDS = 1
 
 
 class Parser(argparse.ArgumentParser):
@@ -157,18 +160,27 @@ def replace_file(path: Path, text: str, mode: int) -> None:
 
 
 def wait_for_claim(bot: telegram.Bot, username: str) -> telegram.Message:
-    offset = 0
+    # Offset 0 confirms nothing: every update, the /claim included, stays queued at Telegram for
+    # sb-inbox, whose offset is saved only after an update's effects are committed. So setup
+    # skips what it has already read by id instead of moving the offset past it.
+    seen: set[int] = set()
     while True:
-        for update in bot.get_updates(offset):
-            offset = update.id + 1
+        updates = bot.get_updates(0)
+        fresh = [update for update in updates if update.id not in seen]
+        if updates and not fresh:
+            # Telegram answers at once while unconfirmed updates are queued, so the long poll
+            # does not pace this loop.
+            time.sleep(REPOLL_SECONDS)
+        for update in fresh:
+            seen.add(update.id)
             message = update.message
-            words = message.text.split() if message else []
+            if message is None:
+                continue
+            words = message.text.split()
             command, _, addressee = (words[0] if words else "").partition("@")
             if command != "/claim" or addressee.lower() not in ("", username.lower()):
                 continue
             if message.chat_type == "supergroup" and message.is_forum:
-                # Confirming the update keeps sb-inbox from reading the /claim again later.
-                bot.get_updates(offset, timeout=0)
                 return message
             if message.chat_type == "supergroup":
                 why = "that supergroup has topics turned off; turn on Topics in its settings"
