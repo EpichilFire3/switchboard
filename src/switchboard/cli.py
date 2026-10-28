@@ -1,16 +1,18 @@
 import argparse
+import getpass
 import os
 import re
 import sqlite3
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import closing, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple, NoReturn
 
-from switchboard import db
+from switchboard import db, telegram
 
 Clock = Callable[[], datetime]
 
@@ -144,7 +146,87 @@ def report_status(args: argparse.Namespace, clock: Clock) -> None:
         )
 
 
-def build_parser() -> Parser:
+def replace_file(path: Path, text: str, mode: int) -> None:
+    # Written beside and renamed over, so a crash leaves the old file or the new one, never half.
+    temp = path.with_name(path.name + ".tmp")
+    with open(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode), "w") as file:
+        # os.open's mode applies only to a new file and only through the umask.
+        os.fchmod(file.fileno(), mode)
+        file.write(text)
+    os.replace(temp, path)
+
+
+def wait_for_claim(bot: telegram.Bot, username: str) -> telegram.Message:
+    offset = 0
+    while True:
+        for update in bot.get_updates(offset):
+            offset = update.id + 1
+            message = update.message
+            words = message.text.split() if message else []
+            command, _, addressee = (words[0] if words else "").partition("@")
+            if command != "/claim" or addressee.lower() not in ("", username.lower()):
+                continue
+            if message.chat_type == "supergroup" and message.is_forum:
+                # Confirming the update keeps sb-inbox from reading the /claim again later.
+                bot.get_updates(offset, timeout=0)
+                return message
+            if message.chat_type == "supergroup":
+                why = "that supergroup has topics turned off; turn on Topics in its settings"
+            else:
+                why = f"it came from a {message.chat_type} chat, not a supergroup with topics"
+            print(f"sb setup telegram: /claim refused: {why}. Still waiting.", file=sys.stderr)
+
+
+def create_topics(conn: sqlite3.Connection, bot: telegram.Bot, chat_id: int) -> None:
+    # Each id is recorded as soon as its topic exists, so a run that fails part way creates no
+    # topic twice when it runs again.
+    if conn.execute("SELECT 1 FROM kv WHERE key = 'harness_topic_id'").fetchone() is None:
+        topic = bot.create_forum_topic(chat_id, "Harness")
+        conn.execute("INSERT INTO kv (key, value) VALUES ('harness_topic_id', ?)", (topic,))
+        print("created topic Harness")
+    missing = conn.execute("SELECT id, name FROM repos WHERE topic_id IS NULL ORDER BY name")
+    for repo_id, name in missing.fetchall():
+        topic = bot.create_forum_topic(chat_id, name)
+        conn.execute("UPDATE repos SET topic_id = ? WHERE id = ?", (topic, repo_id))
+        print(f"created topic {name}")
+
+
+def setup_telegram(transport: telegram.Transport) -> None:
+    with telegram.poller_lock() as held:
+        if not held:
+            sys.exit("sb setup telegram: sb-inbox is polling the bot; stop sb-inbox first")
+        prompt = "Bot token from @BotFather: "
+        token = (getpass.getpass(prompt) if sys.stdin.isatty() else sys.stdin.readline()).strip()
+        bot = telegram.Bot(token, transport)
+        try:
+            username = bot.get_username()
+        except telegram.TelegramError as error:
+            sys.exit(f"sb setup telegram: Telegram rejected the token ({error})")
+        print(
+            f"Add @{username} to a supergroup with topics enabled, as an admin who can manage"
+            " topics, then send /claim in the group from your own account.",
+            flush=True,
+        )
+        claim = wait_for_claim(bot, username)
+        home = Path.home() / ".switchboard"
+        config = home / "config.toml"
+        previous = tomllib.loads(config.read_text())["telegram"] if config.exists() else {}
+        with closing(db.connect()) as conn:
+            if previous.get("chat_id") != claim.chat_id:
+                # Topic ids belong to the chat they were created in.
+                with db.transaction(conn):
+                    conn.execute("UPDATE repos SET topic_id = NULL")
+                    conn.execute("DELETE FROM kv WHERE key = 'harness_topic_id'")
+            replace_file(home / "secrets.env", f"TELEGRAM_BOT_TOKEN={token}\n", 0o600)
+            replace_file(
+                config,
+                f"[telegram]\nchat_id = {claim.chat_id}\nowner_id = {claim.sender_id}\n",
+                0o644,
+            )
+            create_topics(conn, bot, claim.chat_id)
+
+
+def build_parser(transport: telegram.Transport) -> Parser:
     parser = Parser(prog="sb")
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -164,9 +246,18 @@ def build_parser() -> Parser:
     status.add_argument("status", choices=STATUSES)
     status.add_argument("--reason")
     status.set_defaults(handler=report_status)
+
+    setup = commands.add_parser("setup", help="connect switchboard to the services it uses")
+    targets = setup.add_subparsers(dest="target", required=True)
+    telegram_setup = targets.add_parser("telegram", help="configure the bot, the group and topics")
+    telegram_setup.set_defaults(handler=lambda _args, _clock: setup_telegram(transport))
     return parser
 
 
-def main(argv: list[str] | None = None, clock: Clock = utc_now) -> None:
-    args = build_parser().parse_args(argv)
+def main(
+    argv: list[str] | None = None,
+    clock: Clock = utc_now,
+    transport: telegram.Transport = telegram.urlopen_transport,
+) -> None:
+    args = build_parser(transport).parse_args(argv)
     args.handler(args, clock)

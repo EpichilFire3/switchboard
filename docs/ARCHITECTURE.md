@@ -35,13 +35,15 @@ about sessions, caches or budgets, and should not.
 | `ideas` | text, source message, rung that routed it, repo, lane, status |
 | `decisions` | repo, ticket, text, source (owner answer / agent), at |
 | `usage_snapshots` | at, source (`rate_limit_event` / `/usage`), five-hour %, seven-day %, reset times, status |
-| `kv` | Telegram offset, `paused_until`, cursors |
+| `kv` | Telegram offset, `harness_topic_id`, `paused_until`, cursors |
 
 **Files:** `~/.switchboard/packs/<repo>/<ticket>.md` (context packs),
 `~/.switchboard/log/decisions.md` (the decision log mirrored as readable markdown),
-`~/.switchboard/config.toml`, `~/.switchboard/jobs.yaml`, `~/.switchboard/secrets.env`,
+`~/.switchboard/config.toml` (`[telegram]` `chat_id` and `owner_id`), `~/.switchboard/jobs.yaml`,
+`~/.switchboard/secrets.env` (`TELEGRAM_BOT_TOKEN`, mode 600),
 `~/.switchboard/switchboard.lock` (held while a process opens the database and migrates it, so
-concurrent first opens do not race the switch to WAL).
+concurrent first opens do not race the switch to WAL), `~/.switchboard/inbox.lock` (the
+single-poller lock: held by `sb-inbox` for its lifetime and by `sb setup telegram` while it runs).
 
 ## 3. Running Claude Code
 
