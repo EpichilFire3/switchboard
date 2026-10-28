@@ -255,6 +255,8 @@ switchboard/
   src/switchboard/
     cli.py                       # sb: ask, status, decide, repos scan, split, pause, boot, doctor
     config.py  db.py             # config.toml; SQLite schema + migrations
+    telegram.py                  # Bot API client over an injected transport; the single-poller lock
+    fake_telegram.py             # the fake Bot API every test runs against, in place of the network
     tracker/  base.py github.py  # Tracker adapter; gh-backed implementation, epf3 markers
     claude/   invoke.py          # argv builder, timeout, SIGTERM/SIGKILL
               transcript.py      # parse stream-json + ~/.claude/projects JSONL: usage, TTL, files edited, rate_limit_event
