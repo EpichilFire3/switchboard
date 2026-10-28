@@ -7,7 +7,7 @@ import unittest
 
 from tests.sb_harness import SbTestCase
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 RUN_COMMAND_RECORDS = {"repos", "runs", "tickets", "decisions"}
 
 
