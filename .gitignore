@@ -14,3 +14,7 @@
 .wizard/
 .worktrees/
 tmp/
+
+# python caches
+__pycache__/
+*.py[cod]
