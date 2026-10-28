@@ -93,8 +93,6 @@ class FakeBotApi:
         self.chats: dict[int, FakeChat] = {}
         self.updates: list[tuple[int, Json]] = []
         self.last_update_id = 0
-        # Every request in order, refused ones included: (method, parameters).
-        self.requests: list[tuple[str, Json]] = []
 
     def add_chat(
         self, chat_id: int, chat_type: str = "supergroup", is_forum: bool = True
@@ -118,7 +116,6 @@ class FakeBotApi:
         token, _, method = request.full_url.removeprefix(f"{API}/bot").rpartition("/")
         body = json.loads(request.data) if isinstance(request.data, bytes) else {}
         params: Json = body if isinstance(body, dict) else {}
-        self.requests.append((method, params))
         if urllib.parse.unquote(token) != self.token:
             return self._refusal(401, "Unauthorized")
         handler = {
