@@ -11,8 +11,7 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
         """CREATE TABLE repos (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
-            path TEXT NOT NULL UNIQUE,
-            topic_id INTEGER
+            path TEXT NOT NULL UNIQUE
         )""",
         """CREATE TABLE runs (
             run_id TEXT PRIMARY KEY,
@@ -42,6 +41,9 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             source TEXT NOT NULL CHECK (source IN ('agent', 'owner')),
             at TEXT NOT NULL
         )""",
+    ),
+    (
+        "ALTER TABLE repos ADD COLUMN topic_id INTEGER",
         "CREATE TABLE kv (key TEXT PRIMARY KEY, value NOT NULL)",
     ),
 )
