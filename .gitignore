@@ -1,19 +1,30 @@
+# epf3 working files
 .brainstorm/
-.claude/
-.diagnose/
-.devops/
+.research/
 .experiment/
+.recon/
+.spec/
 .implement/
 .implement-tests/
-.research/
-.recon/
 .run-tests/
-.ship/
-.spec/
-.trail/
 .wizard/
+.devops/
+.ship/
+.diagnose/
 .worktrees/
+.trail/
+.claude/*
+!.claude/settings.json
+!.claude/rules/
+
+# temp files
 tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+nohup.out
 
 # python caches
 __pycache__/
