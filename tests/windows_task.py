@@ -13,19 +13,10 @@ the Windows PATH) is never reachable from a test. `sb-inbox` is a stub executabl
 import base64
 import json
 import os
-import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-from tests.sb_harness import COMMAND_TIMEOUT_SECONDS, Home
-
-CLOCK_ENTRY = (
-    "import sys; from datetime import datetime; from switchboard.cli import main;"
-    " instant = datetime.fromisoformat(sys.argv[1]);"
-    " sys.exit(main(sys.argv[2:], clock=lambda: instant))"
-)
-INSTANT = datetime(2032, 2, 29, 23, 47, 52, tzinfo=timezone.utc)
+from tests.sb_harness import Home
 
 DISTRO = "SbTestDistro"
 OWNER = "sbowner"
@@ -87,25 +78,6 @@ def windows_env(*path_entries: Path | str) -> dict[str, str]:
         "WSL_DISTRO_NAME": DISTRO,
         "LOGNAME": OWNER,
     }
-
-
-def install_task(home: Home, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    """Run `sb install-task` once from HOME, with the clock pinned to INSTANT."""
-    return subprocess.run(
-        [sys.executable, "-P", "-c", CLOCK_ENTRY, INSTANT.isoformat(), "install-task"],
-        cwd=home.root,
-        env=home.env(env),
-        capture_output=True,
-        text=True,
-        timeout=COMMAND_TIMEOUT_SECONDS,
-    )
-
-
-def install_task_ok(home: Home, env: dict[str, str]) -> None:
-    """An arrange step: `sb install-task`, failing the test setup unless it exits 0."""
-    result = install_task(home, env)
-    if result.returncode != 0:
-        raise AssertionError(f"arrange step `sb install-task` exited {result.returncode}: {result.stderr}")
 
 
 def recorded_invocations(home: Home) -> list[list[str]]:

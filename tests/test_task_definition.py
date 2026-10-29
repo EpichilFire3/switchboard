@@ -2,10 +2,12 @@
 absolute path, at logon, on workstation unlock and every 10 minutes, with each listed setting set
 explicitly, as the current user without admin rights.
 
-No Task Scheduler is reachable from the test run, so the task's definition is read where it
-exists: the registration script the command hands to powershell.exe. Each spec item is asserted
-by the ScheduledTasks module's or Task Scheduler's own public name for it (see the ledger's
-rulings); every pattern is case-insensitive, as PowerShell is.
+No Windows, and so no Task Scheduler, is reachable from this suite, so the task's exported
+definition cannot be read. The registration script the command hands to powershell.exe stands in
+for it, because that script is the only place the definition exists before Windows receives it.
+Each spec item is asserted by the ScheduledTasks module's or Task Scheduler's own public name for
+it, accepting both the cmdlet-switch and the property spelling of a setting; every pattern is
+case-insensitive, as PowerShell is.
 """
 
 import re
@@ -17,7 +19,6 @@ from tests.windows_task import (
     OWNER,
     install_inbox,
     install_powershell,
-    install_task,
     registration_text,
     windows_env,
 )
@@ -72,7 +73,9 @@ class TaskDefinitionTest(SbTestCase):
         self.home = self.make_home()
         powershell = install_powershell(self.home)
         self.inbox = install_inbox(self.home)
-        self.result = install_task(self.home, windows_env(powershell, self.inbox.parent))
+        self.result = self.home.sb(
+            "install-task", cwd=self.home.root, env=windows_env(powershell, self.inbox.parent)
+        )
         self.script = registration_text(self.home)
 
     def test_install_task_reports_the_registered_task(self) -> None:
@@ -110,9 +113,26 @@ class RelativePathEntryTest(SbTestCase):
         install_inbox(home, "relbin")
         expected = str(home.root / "relbin" / "sb-inbox")
 
-        install_task(home, windows_env(powershell, "relbin"))
+        home.sb("install-task", cwd=home.root, env=windows_env(powershell, "relbin"))
 
         self.assertIn(expected, registration_text(home))
+
+
+class SymlinkedInboxTest(SbTestCase):
+    def test_action_names_the_symlink_found_on_path_not_its_target(self) -> None:
+        home = self.make_home()
+        powershell = install_powershell(home)
+        target = install_inbox(home, "tool-bin")
+        links = home.root / "links"
+        links.mkdir()
+        link = links / "sb-inbox"
+        link.symlink_to(target)
+
+        home.sb("install-task", cwd=home.root, env=windows_env(powershell, links))
+
+        script = registration_text(home)
+        self.assertIn(str(link), script)
+        self.assertNotIn(str(target), script)
 
 
 if __name__ == "__main__":

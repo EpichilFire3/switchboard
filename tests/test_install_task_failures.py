@@ -10,7 +10,6 @@ from tests.sb_harness import SbTestCase
 from tests.windows_task import (
     install_inbox,
     install_powershell,
-    install_task,
     registration_scripts,
     windows_env,
 )
@@ -41,7 +40,7 @@ class MissingPowershellTest(SbTestCase):
     def setUp(self) -> None:
         self.home = self.make_home()
         inbox = install_inbox(self.home)
-        self.result = install_task(self.home, windows_env(inbox.parent))
+        self.result = self.home.sb("install-task", cwd=self.home.root, env=windows_env(inbox.parent))
 
     def test_install_without_powershell_exits_non_zero(self) -> None:
         self.assertNotEqual(self.result.returncode, 0, self.result.stderr)
@@ -64,7 +63,7 @@ class PowershellFailureTest(SbTestCase):
         home = self.make_home()
         powershell = install_powershell(home, exit_code=exit_code, stdout=stdout, stderr=stderr)
         inbox = install_inbox(home)
-        return install_task(home, windows_env(powershell, inbox.parent))
+        return home.sb("install-task", cwd=home.root, env=windows_env(powershell, inbox.parent))
 
     def test_failed_registration_exits_non_zero(self) -> None:
         for case, exit_code, stdout, stderr, _ in POWERSHELL_FAILURES:
@@ -93,7 +92,7 @@ class MissingInboxTest(SbTestCase):
     def setUp(self) -> None:
         self.home = self.make_home()
         powershell = install_powershell(self.home)
-        self.result = install_task(self.home, windows_env(powershell))
+        self.result = self.home.sb("install-task", cwd=self.home.root, env=windows_env(powershell))
 
     def test_install_without_sb_inbox_exits_non_zero(self) -> None:
         self.assertNotEqual(self.result.returncode, 0, self.result.stderr)
