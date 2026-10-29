@@ -18,6 +18,7 @@ from switchboard.telegram import API
 BOT_ID = 1000
 MAX_TEXT = 4096
 MAX_CALLBACK_DATA_BYTES = 64
+MAX_UPDATES = 100
 # Telegram's HTML parse mode: these tags and the four named entities, nothing else.
 TAGS = frozenset(
     "a b blockquote code del em i ins pre s span strike strong tg-emoji tg-spoiler u".split()
@@ -165,10 +166,15 @@ class FakeBotApi:
         return {"id": BOT_ID, "is_bot": True, "username": self.username}
 
     def _get_updates(self, params: Json) -> list[Json]:
-        # A higher offset confirms every update below it, and Telegram forgets those.
         offset = param(params, "offset", int) or 0
-        self.updates = [(number, update) for number, update in self.updates if number >= offset]
-        return [update for _, update in self.updates]
+        if offset < 0:
+            # A negative offset keeps the newest -offset updates and forgets every older one.
+            self.updates = self.updates[offset:]
+        else:
+            # A higher offset confirms every update below it, and Telegram forgets those.
+            self.updates = [(number, update) for number, update in self.updates if number >= offset]
+        limit = param(params, "limit", int) or MAX_UPDATES
+        return [update for _, update in self.updates[:limit]]
 
     def _create_forum_topic(self, params: Json) -> Json:
         chat = self._chat(params)
