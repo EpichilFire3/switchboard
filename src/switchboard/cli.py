@@ -1,6 +1,8 @@
 import argparse
+import getpass
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -10,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple, NoReturn
 
-from switchboard import db
+from switchboard import db, task
 
 Clock = Callable[[], datetime]
 
@@ -119,6 +121,19 @@ def scan_repos(args: argparse.Namespace, clock: Clock) -> None:
         print(f"registered {name}")
 
 
+def install_task(args: argparse.Namespace, clock: Clock) -> None:
+    distro = os.environ.get("WSL_DISTRO_NAME")
+    if not distro:
+        sys.exit("sb install-task: WSL_DISTRO_NAME is unset; run this inside WSL")
+    inbox = shutil.which("sb-inbox")
+    if not inbox:
+        sys.exit("sb install-task: sb-inbox is not on PATH; install switchboard first")
+    # No resolve(): a tool install links sb-inbox from ~/.local/bin into its own venv, and the
+    # task must keep the stable link, not the venv path an upgrade replaces.
+    task.register(distro, getpass.getuser(), Path(inbox).absolute())
+    print(f"registered task {task.NAME}")
+
+
 def record_decision(args: argparse.Namespace, clock: Clock) -> None:
     with open_run(args.command, args.ticket, clock) as run:
         run.conn.execute(
@@ -152,6 +167,9 @@ def build_parser() -> Parser:
     repos_actions = repos.add_subparsers(dest="action", required=True)
     scan = repos_actions.add_parser("scan", help="register every git checkout under ~/side-projects")
     scan.set_defaults(handler=scan_repos)
+
+    install = commands.add_parser("install-task", help="register the Windows task that keeps sb-inbox up")
+    install.set_defaults(handler=install_task)
 
     in_run = Parser(add_help=False)
     in_run.add_argument("--ticket", type=ticket_number, default=os.environ.get("SB_TICKET") or None)
