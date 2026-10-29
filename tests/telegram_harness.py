@@ -48,14 +48,16 @@ import sys
 
 from switchboard.cli import main
 from switchboard.fake_telegram import FakeBotApi
+from switchboard.telegram import Bot
 
 PATIENCE = 5
 STILL_WAITING_EXIT = 75
 PROBE = "from switchboard.telegram import poller_lock\\nwith poller_lock() as held:\\n    print(held)\\n"
+BAD_GATEWAY = json.dumps({"ok": False, "error_code": 502, "description": "Bad Gateway"}).encode()
 
 
 class OwnerStoppedWriting(BaseException):
-    """The scripted owner has sent everything and setup is still polling."""
+    """The scripted owner has sent everything, or stopped setup, while setup is still running."""
 
 
 with open(sys.argv[1], encoding="utf-8") as handle:
@@ -65,24 +67,46 @@ fake = FakeBotApi(scenario["token"])
 existing = {}
 for chat_id, chat_type, is_forum in scenario["chats"]:
     existing[chat_id] = set(fake.add_chat(chat_id, chat_type, is_forum).topics)
+for message in scenario["queued_before"]:
+    fake.post(*message)
 pending = [tuple(message) for message in scenario["owner_writes"]]
-outcome = {"calls": [], "lock_probe": [], "still_waiting": False, "idle_polls": 0}
+outcome = {
+    "calls": [],
+    "lock_probe": [],
+    "still_waiting": False,
+    "idle_polls": 0,
+    "get_updates_calls": 0,
+    "get_updates_params": [],
+}
 
 
 def method_of(request):
     return request.full_url.split("?", 1)[0].rsplit("/", 1)[-1].lower()
 
 
+def probe_lock():
+    probe = subprocess.run(
+        [sys.executable, "-P", "-c", PROBE], capture_output=True, text=True, timeout=60
+    )
+    return probe.stdout.strip()
+
+
 def telegram(request, timeout):
     method = method_of(request)
     outcome["calls"].append(method)
+    if scenario["probe_every_call"]:
+        outcome["lock_probe"].append(probe_lock())
+    if method == "getupdates":
+        outcome["get_updates_calls"] += 1
+        if outcome["get_updates_calls"] == scenario["stop_at_get_updates_call"]:
+            raise OwnerStoppedWriting()
+        if outcome["get_updates_calls"] == scenario["fail_get_updates_call"]:
+            return 502, BAD_GATEWAY
+        outcome["get_updates_params"].append(json.loads(request.data) if request.data else {})
     answer = fake(request, timeout)
     if method == "getupdates":
         if scenario["probe_lock"] and not outcome["lock_probe"]:
-            probe = subprocess.run(
-                [sys.executable, "-P", "-c", PROBE], capture_output=True, text=True, timeout=60
-            )
-            outcome["lock_probe"].append(probe.stdout.strip())
+            outcome["lock_probe"].append(probe_lock())
         if pending:
             fake.post(*pending.pop(0))
         else:
@@ -105,8 +129,12 @@ finally:
         )
         for chat_id, chat in fake.chats.items()
     }
+    outcome["still_queued"] = [
+        update.message.text if update.message else None
+        for update in Bot(scenario["token"], fake).get_updates(0, timeout=0)
+    ]
     with open(sys.argv[2], "w", encoding="utf-8") as handle:
-        json.dump(outcome, handle)
+        json.dump(outcome, handle, default=repr)
 
 if outcome["still_waiting"]:
     sys.exit(STILL_WAITING_EXIT)
@@ -135,6 +163,8 @@ class SetupRun:
     calls: list[str]
     lock_probe: list[str]
     topics_created: dict[int, list[tuple[str, int]]]
+    get_updates_params: list[dict]
+    still_queued: list[str | None]
 
     def topic_names(self, chat_id: int) -> list[str]:
         """Names of the topics this run created in the chat, sorted."""
@@ -145,13 +175,28 @@ class SetupRun:
         return {name: topic_id for name, topic_id in self.topics_created.get(chat_id, [])}
 
 
-def _scenario(
-    home: Home,
-    accepts: str,
-    chats: tuple[Chat, ...],
-    owner_writes: tuple[OwnerMessage, ...],
-    probe_lock: bool,
-) -> tuple[list[str], Path]:
+@dataclass(frozen=True)
+class Telegram:
+    """What the fake Bot API holds and does around one setup run.
+
+    queued_before: messages queued at Telegram before setup starts.
+    owner_writes: messages the owner sends while setup runs, one after each getUpdates answer.
+    probe_lock: probe the poller lock at the first getUpdates; probe_every_call: at every Telegram call.
+    fail_get_updates_call: the N-th getUpdates call (from 1) is answered HTTP 502 and reaches no fake.
+    stop_at_get_updates_call: the owner stops setup at the N-th getUpdates call.
+    """
+
+    accepts: str
+    chats: tuple[Chat, ...]
+    owner_writes: tuple[OwnerMessage, ...]
+    queued_before: tuple[OwnerMessage, ...] = ()
+    probe_lock: bool = False
+    probe_every_call: bool = False
+    fail_get_updates_call: int | None = None
+    stop_at_get_updates_call: int | None = None
+
+
+def _scenario(home: Home, telegram: Telegram) -> tuple[list[str], Path]:
     folder = home.root / "fake-telegram"
     folder.mkdir(exist_ok=True)
     scenario_path = folder / "scenario.json"
@@ -159,10 +204,14 @@ def _scenario(
     scenario_path.write_text(
         json.dumps(
             {
-                "token": accepts,
-                "chats": [list(chat) for chat in chats],
-                "owner_writes": [list(message) for message in owner_writes],
-                "probe_lock": probe_lock,
+                "token": telegram.accepts,
+                "chats": [list(chat) for chat in telegram.chats],
+                "owner_writes": [list(message) for message in telegram.owner_writes],
+                "queued_before": [list(message) for message in telegram.queued_before],
+                "probe_lock": telegram.probe_lock,
+                "probe_every_call": telegram.probe_every_call,
+                "fail_get_updates_call": telegram.fail_get_updates_call,
+                "stop_at_get_updates_call": telegram.stop_at_get_updates_call,
             }
         ),
         encoding="utf-8",
@@ -187,6 +236,8 @@ def _read_outcome(outcome_path: Path, exit_code: int, stdout: str, stderr: str) 
             int(chat_id): [(name, int(topic_id)) for name, topic_id in topics]
             for chat_id, topics in outcome["topics_created"].items()
         },
+        get_updates_params=outcome["get_updates_params"],
+        still_queued=outcome["still_queued"],
     )
 
 
@@ -197,10 +248,26 @@ def run_setup(
     chats: tuple[Chat, ...],
     owner_writes: tuple[OwnerMessage, ...],
     accepts: str = ACCEPTED_TOKEN,
+    queued_before: tuple[OwnerMessage, ...] = (),
     probe_lock: bool = False,
+    probe_every_call: bool = False,
+    fail_get_updates_call: int | None = None,
+    stop_at_get_updates_call: int | None = None,
 ) -> SetupRun:
     """Run `sb setup telegram` once, typing `typed` as one stdin line, against a fake holding `accepts`."""
-    command, outcome_path = _scenario(home, accepts, chats, owner_writes, probe_lock)
+    command, outcome_path = _scenario(
+        home,
+        Telegram(
+            accepts=accepts,
+            chats=chats,
+            owner_writes=owner_writes,
+            queued_before=queued_before,
+            probe_lock=probe_lock,
+            probe_every_call=probe_every_call,
+            fail_get_updates_call=fail_get_updates_call,
+            stop_at_get_updates_call=stop_at_get_updates_call,
+        ),
+    )
     result = subprocess.run(
         command,
         cwd=home.root,
@@ -258,7 +325,9 @@ def run_setup_on_a_terminal(
     Returns the run and everything the terminal showed. A setup that never turns echo off gets the token
     typed after ECHO_OFF_WAIT_SECONDS, so the echo lands in the transcript.
     """
-    command, outcome_path = _scenario(home, accepts, chats, owner_writes, False)
+    command, outcome_path = _scenario(
+        home, Telegram(accepts=accepts, chats=chats, owner_writes=owner_writes)
+    )
     master, terminal = pty.openpty()
     process = subprocess.Popen(
         command,

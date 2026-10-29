@@ -73,6 +73,18 @@ class LockTakenTest(SbTestCase):
 
         self.assertEqual(run.lock_probe, ["False"], run.stderr)
 
+    def test_setup_holds_the_poller_lock_on_every_telegram_call(self) -> None:
+        run = run_setup(
+            self.home,
+            typed=ACCEPTED_TOKEN,
+            chats=(GROUP_WITH_TOPICS,),
+            owner_writes=CLAIM_IN_GROUP,
+            probe_every_call=True,
+        )
+
+        self.assertEqual(run.exit_code, 0, run.stderr)
+        self.assertEqual(run.lock_probe, ["False"] * len(run.calls), run.calls)
+
     def test_setup_proceeds_after_the_previous_holder_exited(self) -> None:
         subprocess.run(
             [sys.executable, "-P", "-c", HOLDER],
