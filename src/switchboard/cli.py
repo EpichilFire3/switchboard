@@ -18,8 +18,6 @@ from switchboard import db, telegram
 Clock = Callable[[], datetime]
 
 STATUSES = ("progress", "blocked", "done", "needs-split")
-# The spec's first reconnect delay for the poller, reused while setup re-reads a queue it has seen.
-REPOLL_SECONDS = 1
 
 
 class Parser(argparse.ArgumentParser):
@@ -159,29 +157,41 @@ def replace_file(path: Path, text: str, mode: int) -> None:
     os.replace(temp, path)
 
 
-def wait_for_claim(bot: telegram.Bot, username: str) -> telegram.Message:
-    # Offset 0 confirms nothing: every update, the /claim included, stays queued at Telegram for
-    # sb-inbox, whose offset is saved only after an update's effects are committed. So setup
-    # skips what it has already read by id instead of moving the offset past it.
-    seen: set[int] = set()
+class Claim(NamedTuple):
+    update_id: int
+    chat_id: int
+    sender_id: int
+    discarded: int
+
+
+def with_backoff[T](call: Callable[[], T]) -> T:
+    # Failure 39's rule: retry after 1 s, doubling up to 60 s, until the call succeeds.
+    delay = 1
     while True:
-        updates = bot.get_updates(0)
-        fresh = [update for update in updates if update.id not in seen]
-        if updates and not fresh:
-            # Telegram answers at once while unconfirmed updates are queued, so the long poll
-            # does not pace this loop.
-            time.sleep(REPOLL_SECONDS)
-        for update in fresh:
-            seen.add(update.id)
+        try:
+            return call()
+        except (OSError, telegram.TelegramError) as error:
+            print(f"sb setup telegram: {error}; retrying in {delay} s", file=sys.stderr)
+        time.sleep(delay)
+        delay = min(delay * 2, 60)
+
+
+def wait_for_claim(bot: telegram.Bot, username: str, offset: int) -> Claim:
+    # Each poll confirms the updates before it, so whatever setup reads is consumed: sb-inbox
+    # cannot poll while setup holds the lock, and setup has a use only for its /claim.
+    discarded = 0
+    while True:
+        for update in with_backoff(lambda: bot.get_updates(offset)):
+            offset = update.id + 1
             message = update.message
-            if message is None:
-                continue
-            words = message.text.split()
+            words = message.text.split() if message else []
             command, _, addressee = (words[0] if words else "").partition("@")
-            if command != "/claim" or addressee.lower() not in ("", username.lower()):
+            is_ours = addressee.lower() in ("", username.lower())
+            if message is None or command != "/claim" or not is_ours:
+                discarded += 1
                 continue
             if message.chat_type == "supergroup" and message.is_forum:
-                return message
+                return Claim(update.id, message.chat_id, message.sender_id, discarded)
             if message.chat_type == "supergroup":
                 why = "that supergroup has topics turned off; turn on Topics in its settings"
             else:
@@ -214,12 +224,15 @@ def setup_telegram(transport: telegram.Transport) -> None:
             username = bot.get_username()
         except telegram.TelegramError as error:
             sys.exit(f"sb setup telegram: Telegram rejected the token ({error})")
+        # Offset -1 returns at most the newest queued update and makes Telegram forget the rest,
+        # so polling from past it reads only updates that reached Telegram after setup started.
+        newest = with_backoff(lambda: bot.get_updates(-1, timeout=0))
         print(
             f"Add @{username} to a supergroup with topics enabled, as an admin who can manage"
             " topics, then send /claim in the group from your own account.",
             flush=True,
         )
-        claim = wait_for_claim(bot, username)
+        claim = wait_for_claim(bot, username, newest[-1].id + 1 if newest else 0)
         home = Path.home() / ".switchboard"
         config = home / "config.toml"
         previous = tomllib.loads(config.read_text())["telegram"] if config.exists() else {}
@@ -236,6 +249,17 @@ def setup_telegram(transport: telegram.Transport) -> None:
                 0o644,
             )
             create_topics(conn, bot, claim.chat_id)
+            # sb-inbox then resumes from Telegram's first unconfirmed update, whichever bot the
+            # token now belongs to.
+            conn.execute("DELETE FROM kv WHERE key = 'telegram_offset'")
+        # Confirms through the /claim and no further: what the owner sent after it stays queued.
+        with_backoff(lambda: bot.get_updates(claim.update_id + 1, timeout=0))
+        if newest:
+            print("Updates queued before setup started were discarded.")
+        if claim.discarded:
+            print(f"{claim.discarded} updates sent while setup waited were discarded.")
+        if newest or claim.discarded:
+            print("Tap again any answer you gave while sb-inbox was stopped.")
 
 
 def build_parser(transport: telegram.Transport) -> Parser:

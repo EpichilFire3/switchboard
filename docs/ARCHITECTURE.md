@@ -35,7 +35,7 @@ about sessions, caches or budgets, and should not.
 | `ideas` | text, source message, rung that routed it, repo, lane, status |
 | `decisions` | repo, ticket, text, source (owner answer / agent), at |
 | `usage_snapshots` | at, source (`rate_limit_event` / `/usage`), five-hour %, seven-day %, reset times, status |
-| `kv` | Telegram offset, `harness_topic_id`, `paused_until`, cursors |
+| `kv` | Telegram offset (`telegram_offset`, deleted by `sb setup telegram`), `harness_topic_id`, `paused_until`, cursors |
 
 **Files:** `~/.switchboard/packs/<repo>/<ticket>.md` (context packs),
 `~/.switchboard/log/decisions.md` (the decision log mirrored as readable markdown),
